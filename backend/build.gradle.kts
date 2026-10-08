@@ -13,6 +13,7 @@ description = "budgets-and-subscriptions"
 // single place to bump each.
 val groovyVersion = "5.1.1"
 val spockVersion = "2.4-groovy-5.0"
+val jjwtVersion = "0.12.6"
 
 java {
     toolchain {
@@ -34,8 +35,11 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j")
     implementation("org.flywaydb:flyway-database-postgresql")
+    implementation("io.jsonwebtoken:jjwt-api:$jjwtVersion")
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     runtimeOnly("org.postgresql:postgresql")
+    runtimeOnly("io.jsonwebtoken:jjwt-impl:$jjwtVersion")
+    runtimeOnly("io.jsonwebtoken:jjwt-jackson:$jjwtVersion")
 
     testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")
     testImplementation("org.springframework.boot:spring-boot-starter-flyway-test")
