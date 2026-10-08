@@ -1,0 +1,26 @@
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+!.vscode/extensions.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / local env overrides
+.env
+.env.local
+.env.*.local
+
+# Claude Code: per-machine local permission overrides, not shared config
+.claude/settings.local.json
+
+# Logs
+*.log
+logs/
+
+# backend/ and frontend/ each carry their own .gitignore for build output
+# (build/, node_modules/, dist/, etc.) — this file only covers what's outside both.

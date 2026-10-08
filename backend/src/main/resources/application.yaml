@@ -1,0 +1,16 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: budgets-and-subscriptions
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/budgetsandsubscriptions}
+    username: ${DB_USERNAME:budgetsandsubscriptions}
+    password: ${DB_PASSWORD:budgetsandsubscriptions}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    locations: classpath:db/migration
