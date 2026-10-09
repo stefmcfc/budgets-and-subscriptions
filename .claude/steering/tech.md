@@ -52,16 +52,21 @@ data if they shared a container — the isolation is worth the (negligible) extr
 - `backend/src/main/resources/application.yaml` (dev) and
   `backend/src/test/resources/application.yaml` (test) both point at `localhost:5433`, env-var
   overridable (`DB_URL`/`DB_USERNAME`/`DB_PASSWORD`) — checked-in values are local-dev placeholders,
-  not real secrets.
-- **Spring Data JPA + Hibernate** as the ORM layer. `ddl-auto: validate` is already set (Hibernate
-  checks mapped entities against the real schema rather than generating one) — harmless with zero
-  entities today, but means schema changes must come from a Flyway migration once one exists, not
-  from Hibernate auto-DDL.
+  not real secrets. A second test-resources file, `application-test-db.yaml`, is loaded on top of
+  the base one whenever a spec is annotated `@ActiveProfiles("test-db")` — needed by
+  `@DataJpaTest` specs that use `@AutoConfigureTestDatabase(replace = Replace.NONE)` to hit the real
+  Postgres test database instead of an auto-swapped embedded one (e.g. `UserSpec`, for AC-01's
+  DB-level unique constraint).
+- **Spring Data JPA + Hibernate** as the ORM layer. `ddl-auto: validate` is set (Hibernate checks
+  mapped entities against the real schema rather than generating one) — now load-bearing, not just
+  harmless scaffolding, since `User` is a real entity validated against `V001`'s migrated schema on
+  every context load. Schema changes come from a new Flyway migration, never from Hibernate
+  auto-DDL.
 - **Flyway** for migrations — `spring-boot-starter-flyway` + `org.flywaydb:flyway-database-postgresql`
   are both in `build.gradle.kts` (the Postgres-dialect module doesn't come bundled with the
   starter alone). `spring.flyway.locations` is already set in `application.yaml`, pointing at
-  `classpath:db/migration` — no migrations exist there yet, so Flyway currently has nothing to
-  run on startup. Write the first one (`V001__...sql`) as part of the first entity.
+  `classpath:db/migration`. `V001__create_users_table.sql` is the first real migration, creating
+  `users` with a `lower(email)` case-insensitive unique index.
 - Every entity will carry an owner/user reference once auth exists (see `product.md`'s
   multi-user-readiness rationale) — this is a readiness seam, not multi-tenancy itself.
 - **Gotcha — Docker Desktop's daemon isn't always running even when the CLI is installed.**
