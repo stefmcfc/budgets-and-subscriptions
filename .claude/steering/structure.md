@@ -1,9 +1,10 @@
 # Project Structure
 
-**Status: scaffolded only.** `backend/` has the Spring Boot entry point class and an empty
-`application.yaml`; `frontend/` has a bare Vite + React + TS starter. No domain package exists on
-either side yet. Update this doc as real packages/directories land — don't let it drift into
-describing a target that was never built, the way an early scaffolding doc can.
+**Status: authentication underway.** `backend/` has its first domain package: `model/User.java`,
+`repository/UserRepository.java`, and `db/migration/V001__create_users_table.sql`, covered by
+`UserSpec.groovy` (AUTH-001-AC-01 through AC-04). `frontend/` is still a bare Vite + React + TS
+starter — no domain code there yet. Update this doc as more real packages/directories land — don't
+let it drift into describing a target that was never built, the way an early scaffolding doc can.
 
 ## Layout
 
@@ -64,7 +65,8 @@ backend/
 │       │   └── uk/co/stefirby/budgetsandsubscriptions/
 │       │       └── {controller,service,repository,model,security,config,exception}/  # One *Spec.groovy per class
 │       └── resources/
-│           └── application.yaml       # Test profile
+│           ├── application.yaml       # Base test config, loaded for every test
+│           └── application-test-db.yaml  # Loaded on top when @ActiveProfiles("test-db")
 ├── gradle/wrapper/                    # Gradle wrapper (Windows gradlew.bat only)
 ├── build.gradle.kts
 ├── settings.gradle.kts
@@ -111,9 +113,10 @@ Colocated with source: `ComponentName.test.tsx` / `fileName.test.ts`. Run with `
 
 - **PostgreSQL**, local dev via Docker — own dedicated container (`docker-compose.yml`), port
   `5433`, not shared with `behavioural-activation`'s container (see `tech.md` for why).
-- **Migrations**: `backend/src/main/resources/db/migration/` (Flyway) — not yet added to the
-  build, no migrations exist yet.
-- **JPA Entities**: `backend/src/main/java/uk/co/stefirby/budgetsandsubscriptions/model/`.
+- **Migrations**: `backend/src/main/resources/db/migration/` (Flyway) — `V001__create_users_table.sql`
+  is the first one, creating `users` (including the `lower(email)` case-insensitive unique index).
+- **JPA Entities**: `backend/src/main/java/uk/co/stefirby/budgetsandsubscriptions/model/` — `User`
+  is the first one.
 
 ## Build artifacts
 

@@ -1,0 +1,8 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/budgetsandsubscriptions_test}
+    username: ${DB_USERNAME:budgetsandsubscriptions}
+    password: ${DB_PASSWORD:budgetsandsubscriptions}
+  jpa:
+    hibernate:
+      ddl-auto: validate

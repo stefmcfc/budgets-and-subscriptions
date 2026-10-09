@@ -51,6 +51,69 @@ Deferred/out-of-scope items raised during this pass live in `spec_candidates.md`
 - **No email verification in v1** — see `spec_candidates.md` for the full deferral rationale and
   what it would take to add later.
 
+## Email storage
+
+- **Stored as plain text in the `email` column** — not hashed, not application-level encrypted.
+  Decided 2026-10-08.
+- **Why plain text is actually correct here, not just simplest**: email needs to support three
+  things a one-way hash (right choice for the password) would break entirely — a case-insensitive
+  *lookup* at login (`WHERE lower(email) = ?`, not just an equality check against one known value),
+  *display* back to the user (`UserResponse.email` in every register/login/me response), and, if
+  email verification is ever picked up later (`spec_candidates.md`), actually *sending* to it.
+  Reversible application-level encryption (e.g. a JPA `AttributeConverter` doing AES) would
+  preserve recoverability, but at a real cost: it typically breaks native case-insensitive
+  uniqueness/indexing unless done deterministically (which weakens the whole point of encrypting
+  it), and adds key-management machinery (rotation, where the key itself lives) for a column most
+  production systems don't encrypt at the app layer in the first place.
+- **Implementation note for the migration** (yours to decide/hand-code, not a design decision
+  being made here): the case-insensitive uniqueness constraint (`AUTH-001-AC-01`) needs a DB-level
+  mechanism — a functional unique index on `LOWER(email)`, or Postgres's `citext` column type.
+
+### PII implications, and what this would look like in a real enterprise project
+
+Email is personal data (PII) under GDPR/UK-GDPR and most privacy regimes, even stored in plain
+text — "PII" describes *what the data is*, not how it's encoded at rest. Plain-text storage here
+is a reasonable call for this project's actual threat model: local-only hosting, single real user,
+no cloud deployment, no third parties with DB access. That calculation changes completely in a
+real multi-tenant enterprise system, where I'd expect most or all of the following, roughly in
+order of how cheap they are to adopt:
+
+- **Infrastructure-level encryption at rest** (disk/volume encryption, encrypted DB backups, TLS
+  everywhere in transit) as the baseline — this is the actual industry-standard control for email,
+  not column-level crypto. Nearly free to turn on with most managed Postgres offerings (RDS, Cloud
+  SQL) and should exist regardless of what's encrypted at the application layer.
+- **Strict access control and audit logging** on who/what can query the `users` table at all —
+  least-privilege DB roles (the app's own connection shouldn't be able to do things an admin tool
+  needs), and an audit trail of admin actions against user records (relevant here too, since
+  `admin_account_management` already lets an admin touch other users' accounts).
+- **Never logging PII** — application logs, error traces, and APM/observability tooling must not
+  capture raw emails (or anything else PII) even incidentally; this is a common real-world leak
+  vector that has nothing to do with how the DB column itself is encoded.
+- **Data minimization and retention policy** — collect only what's needed (this project already
+  does: email + a display name, nothing more), and have an explicit retention/deletion policy
+  rather than keeping every record indefinitely by default.
+- **A real deletion/right-to-erasure path** — GDPR's "right to be forgotten" means an account
+  deletion feature (already deferred here, see "Extended admin account management" in
+  `spec_candidates.md`) needs to actually erase or irreversibly anonymize PII, not just flip a
+  `deleted` flag while the row (and email) lingers.
+- **Field-level encryption for genuinely high-sensitivity fields only** — reserved for things like
+  bank account numbers, national ID numbers, or payment data (this project's own account-balance
+  data arguably qualifies more than email does), using envelope encryption via a managed KMS/HSM
+  with key rotation — not applied blanket-wide to every PII column, since it has real query/index
+  and operational costs that aren't worth paying everywhere.
+- **Formal classification and process**: a data classification policy (what's PII vs. sensitive vs.
+  public), a DPIA (Data Protection Impact Assessment) for anything handling PII at scale, a named
+  data controller/processor relationship if a third party is involved, and documented breach
+  notification procedures (GDPR's 72-hour rule) — all organizational/process controls that exist
+  independently of any code, and that a one-user local app has no practical analog for.
+
+The honest summary: encrypting the `email` column itself would be a relatively low-value, highly
+visible thing to point at and say "secure," while the controls that actually matter at enterprise
+scale (access control, audit logging, not leaking PII into logs, retention/deletion policy,
+infrastructure-level encryption) are mostly invisible and have nothing to do with the column's own
+encoding. Good security engineering optimizes for the first list, not for encrypting fields that
+don't need it.
+
 ## Registration auto-login
 
 - **Registration issues the same access-token cookie login does** — a newly registered user is
