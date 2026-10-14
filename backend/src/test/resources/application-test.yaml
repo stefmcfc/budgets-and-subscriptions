@@ -6,3 +6,10 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+app:
+  cookie:
+    expiry-minutes: 15
+  cors:
+    allowed-origins: http://localhost:5180
+  jwt:
+    secret: ${JWT_SECRET_KEY:5WZMZS3D1588h7qc7tYEP1nVJOmgxtth+gSlk46c77M=}
