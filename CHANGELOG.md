@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-14
+
 ### Added
 - `User` JPA entity and first Flyway migration (`V001__create_users_table.sql`), backing the
   in-progress authentication feature: case-insensitive unique email, required display name,
