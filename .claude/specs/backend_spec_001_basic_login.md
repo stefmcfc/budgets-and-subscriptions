@@ -1,6 +1,6 @@
 # Basic Login (Backend)
 
-**Status**: Not started
+**Status**: In progress
 **Priority**: P0 — build order step 1 ("simplest secure version first"); every other backend
 feature depends on authenticated requests existing.
 **Depends on**: None — first backend spec in the project.
@@ -204,15 +204,15 @@ spec.
 
 ## Acceptance Criteria Summary
 
-- [ ] AUTH-001-AC-01 [AUTO]: Case-insensitive unique email constraint on `User`
-- [ ] AUTH-001-AC-02 [AUTO]: `User.role` defaults to `USER`
-- [ ] AUTH-001-AC-03 [AUTO]: `User.displayName` is required
-- [ ] AUTH-001-AC-04 [AUTO]: `users` table schema matches entity mapping at startup
-- [ ] AUTH-001-AC-05 [AUTO]: Successful registration creates a `USER` with a hashed password, sets the access-token cookie, returns 201
-- [ ] AUTH-001-AC-06 [AUTO]: Duplicate (case-insensitive) email registration returns 409, no user created
-- [ ] AUTH-001-AC-07 [AUTO]: Password under 12 characters returns 400, no user created
-- [ ] AUTH-001-AC-08 [AUTO]: Malformed email or blank display name returns 400, no user created
-- [ ] AUTH-001-AC-09 [AUTO]: Registration response never includes password/hash/raw JWT
+- [x] AUTH-001-AC-01 [AUTO]: Case-insensitive unique email constraint on `User`
+- [x] AUTH-001-AC-02 [AUTO]: `User.role` defaults to `USER`
+- [x] AUTH-001-AC-03 [AUTO]: `User.displayName` is required
+- [x] AUTH-001-AC-04 [AUTO]: `users` table schema matches entity mapping at startup
+- [x] AUTH-001-AC-05 [AUTO]: Successful registration creates a `USER` with a hashed password, sets the access-token cookie, returns 201
+- [x] AUTH-001-AC-06 [AUTO]: Duplicate (case-insensitive) email registration returns 409, no user created
+- [x] AUTH-001-AC-07 [AUTO]: Password under 12 characters returns 400, no user created
+- [x] AUTH-001-AC-08 [AUTO]: Malformed email or blank display name returns 400, no user created
+- [x] AUTH-001-AC-09 [AUTO]: Registration response never includes password/hash/raw JWT
 - [ ] AUTH-001-AC-10 [AUTO]: Successful login sets the access-token cookie, returns 200 with user body
 - [ ] AUTH-001-AC-11 [AUTO]: Failed login (bad email or password) returns 401 uniformly, no cookie set
 - [ ] AUTH-001-AC-12 [AUTO]: Access-token claims are limited to user id and role

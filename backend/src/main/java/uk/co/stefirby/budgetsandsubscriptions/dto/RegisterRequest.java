@@ -1,4 +1,19 @@
 package uk.co.stefirby.budgetsandsubscriptions.dto;
 
-public record RegisterRequest(String email, String password, String displayName) {
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+
+public record RegisterRequest(
+        @NotBlank
+        @Email
+        String email,
+
+        @NotBlank
+        @Size(min = 12)
+        String password,
+
+        @NotBlank
+        String displayName)
+{
 }
