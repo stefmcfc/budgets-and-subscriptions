@@ -52,6 +52,25 @@ Monorepo, matching the same split used by `behavioural-activation` and `series-r
 
 Full structure/tech detail: see Deep-dive references below — don't duplicate it here.
 
+## Versioning & Changelog
+
+The app is versioned as one unit with Semantic Versioning: `backend/build.gradle.kts` (`version`)
+and `frontend/package.json` (`"version"`) are kept in sync, even while the frontend is still a bare
+scaffold. Every notable change is recorded in `CHANGELOG.md` (Keep a Changelog format, per this
+machine's global versioning defaults).
+
+- Add an entry under `## [Unreleased]` as part of the same change that ships a user-facing feature
+  or fix — not retroactively.
+- **Merging to `main` always needs the user's explicit go-ahead in that instance** — never merge
+  without a check-in first, even if the PR is green and tests pass.
+- **Before that check-in, cut the release if `[Unreleased]` is non-empty**: move it into a dated
+  `## [x.y.z] - YYYY-MM-DD` section and bump both version fields together — **major** for breaking
+  changes, **minor** for new features, **patch** for fixes/chores with no behavior change. Do this
+  as a commit on the feature branch itself, before merging — never as a separate follow-up PR.
+  "This PR added its own `[Unreleased]` entry" and "the release was actually cut at merge time" are
+  two separate checks; passing the first doesn't imply the second, so re-verify both at every merge
+  even when the previous one already got it right.
+
 ## Deep-dive references
 
 Read these when working in the relevant area — don't duplicate their content here:
