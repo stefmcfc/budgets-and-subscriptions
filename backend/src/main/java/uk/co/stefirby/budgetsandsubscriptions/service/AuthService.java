@@ -1,12 +1,16 @@
 package uk.co.stefirby.budgetsandsubscriptions.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import uk.co.stefirby.budgetsandsubscriptions.dto.LoginRequest;
 import uk.co.stefirby.budgetsandsubscriptions.dto.RegisterRequest;
 import uk.co.stefirby.budgetsandsubscriptions.dto.RegisterResponse;
 import uk.co.stefirby.budgetsandsubscriptions.exception.DuplicateEmailException;
+import uk.co.stefirby.budgetsandsubscriptions.exception.LoginException;
 import uk.co.stefirby.budgetsandsubscriptions.model.User;
 import uk.co.stefirby.budgetsandsubscriptions.repository.UserRepository;
 
@@ -14,6 +18,10 @@ import java.util.Optional;
 
 @Service
 public class AuthService {
+    private static final Logger LOG = LoggerFactory.getLogger(AuthService.class);
+    private static final String DUMMY_HASH = "$2a$10$lpv0VpOQoLXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXDummyPassword";
+    protected static final String MESSAGE_DUPLICATE_EMAIL = "A user already exists with this email address";
+    protected static final String MESSAGE_LOGIN_ERROR = "Unable to login";
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -28,21 +36,23 @@ public class AuthService {
         // at this point validation of fields has already happened behind the scenes.
 
         // first check to see if user (email address) already exists.
-        String email = request.email();
-        String displayName = request.displayName();
-        Optional<User> userCheck = userRepository.findByEmail(request.email());
+        String email = request.email().toLowerCase();
+        Optional<User> userCheck = userRepository.findByEmail(email);
         if (userCheck.isPresent()) {
-            throw new DuplicateEmailException("Email already exists (same case)");
+            LOG.warn(MESSAGE_DUPLICATE_EMAIL);
+            throw new DuplicateEmailException(MESSAGE_DUPLICATE_EMAIL);
         }
 
         // create the user
+        String displayName = request.displayName();
         String encodedPassword = passwordEncoder.encode(request.password());
         User newUser = new User(email, encodedPassword, displayName);
         User savedUser;
         try {
             savedUser = userRepository.saveAndFlush(newUser);
         } catch (DataIntegrityViolationException _) {
-            throw new DuplicateEmailException("Email already exists (different case)");
+            LOG.warn(MESSAGE_DUPLICATE_EMAIL);
+            throw new DuplicateEmailException(MESSAGE_DUPLICATE_EMAIL);
         }
 
         // fetch the details from the db
@@ -51,4 +61,28 @@ public class AuthService {
 
     }
 
+    @Transactional
+    public RegisterResponse login(LoginRequest request) {
+        String email = request.email().toLowerCase();
+        Optional<User> userCheck = userRepository.findByEmail(email);
+        if (userCheck.isEmpty()) {
+            // run a dummy passwordEncoder.matches() against a constant hash on the not-found path
+            // so both branches take the same time
+            passwordEncoder.matches(request.password(), DUMMY_HASH);
+
+            LOG.warn("{} (user does not exist)", MESSAGE_LOGIN_ERROR);
+            throw new LoginException(MESSAGE_LOGIN_ERROR);
+        }
+
+        User user = userCheck.get();
+        String passwordHash = user.getPasswordHash();
+        String password = request.password();
+        if (!passwordEncoder.matches(password, passwordHash)) {
+            LOG.warn("{} (incorrect password)", MESSAGE_LOGIN_ERROR);
+            throw new LoginException(MESSAGE_LOGIN_ERROR);
+        }
+
+        return new RegisterResponse(user.getId(), user.getEmail(),
+                user.getDisplayName(), user.getRole().toString());
+    }
 }

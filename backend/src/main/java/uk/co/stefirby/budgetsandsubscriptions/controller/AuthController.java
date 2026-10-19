@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import uk.co.stefirby.budgetsandsubscriptions.dto.LoginRequest;
 import uk.co.stefirby.budgetsandsubscriptions.dto.RegisterRequest;
 import uk.co.stefirby.budgetsandsubscriptions.dto.RegisterResponse;
 import uk.co.stefirby.budgetsandsubscriptions.security.JwtBuilder;
@@ -35,6 +36,15 @@ public class AuthController {
         RegisterResponse response = authService.register(requestBody);
         ResponseCookie cookie = createCookie(response.id().toString(), response.role());
         return ResponseEntity.status(HttpStatus.CREATED)
+                .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                .body(response);
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<RegisterResponse> login(@Valid @RequestBody LoginRequest loginBody) {
+        RegisterResponse response = authService.login(loginBody);
+        ResponseCookie cookie = createCookie(response.id().toString(), response.role());
+        return ResponseEntity.status(HttpStatus.OK)
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
                 .body(response);
     }

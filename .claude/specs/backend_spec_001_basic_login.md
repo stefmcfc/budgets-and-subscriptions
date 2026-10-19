@@ -33,6 +33,11 @@ such that persisting a second user whose email differs from an existing one only
 **Rationale**: Design decision (`design-decisions.md`'s "Registration / login identifier") — email
 is the sole login identifier; `Foo@x.com` and `foo@x.com` must collide.
 
+**Addendum (found during AUTH-001-AC-10/AC-11 code review)**: this constraint alone doesn't make
+*lookups* case-insensitive — see `AUTH-001-AC-18`, which normalizes email at the `AuthService`
+boundary so registration and login both honor this guarantee directly, rather than relying solely
+on the DB-level functional index below.
+
 #### AUTH-001-AC-02 [AUTO]: Role defaults to USER
 **Statement**: The `User` entity shall default `role` to `USER` when no role is explicitly set at
 creation.
@@ -83,7 +88,11 @@ existing user case-insensitively, then the `AuthController` shall respond `409 C
 not create a user.
 
 **Rationale**: Enforces AUTH-001-AC-01's uniqueness constraint at the API layer with a meaningful
-status code rather than surfacing a raw constraint-violation error.
+status code rather than surfacing a raw constraint-violation error. With `AUTH-001-AC-18`'s
+normalization in place, a same-or-different-case duplicate is caught directly by the up-front
+lookup; the DB's functional unique index (and the `DataIntegrityViolationException` fallback that
+catches it) remains purely as a safety net against a race between two concurrent registrations for
+the same email.
 
 #### AUTH-001-AC-07 [AUTO]: Password below minimum length rejected
 **Statement**: If `POST /api/auth/register` is requested with a password shorter than 12
@@ -129,6 +138,12 @@ access-token cookie.
 **Rationale**: Standard practice — a distinct "no such email" vs. "wrong password" response leaks
 which emails are registered.
 
+**Addendum (found during AUTH-001-AC-11 code review)**: this AC governs only genuine credential
+mismatches — a syntactically well-formed email/password pair that simply doesn't match an
+account. A structurally invalid request (blank or missing `email`/`password`) is a different
+failure category, handled by `AUTH-001-AC-19` below. See that AC's rationale for why this split
+doesn't weaken this AC's leak-prevention intent.
+
 #### AUTH-001-AC-12 [AUTO]: Access-token claims are minimal
 **Statement**: The access-token JWT issued by login shall contain no claims beyond the user's id
 (`sub`) and role — specifically, it shall not contain the user's email or `displayName`.
@@ -143,6 +158,19 @@ the raw JWT string, under any outcome.
 
 **Rationale**: The token is cookie-only by design (`design-decisions.md`) — the response body
 exists only to give the frontend the user's displayable identity.
+
+#### AUTH-001-AC-19 [AUTO]: Blank or missing login fields rejected as a malformed request
+**Statement**: If `POST /api/auth/login` is requested with a blank or missing `email` or
+`password` field, then the `AuthController` shall respond `400 Bad Request` and shall not set an
+access-token cookie.
+
+**Rationale**: Added during `AUTH-001-AC-11` code review — `LoginRequest`'s `@NotBlank`
+constraints already produce this behavior incidentally via `GlobalExceptionHandler`, but it had
+never been a deliberate, documented, or tested decision. Decided to keep it as a `400`, matching
+the same malformed-input treatment `AUTH-001-AC-08` already gives registration: a blank/missing
+field carries no information about whether any account exists (it fails identically either way),
+so it doesn't implicate `AUTH-001-AC-11`'s "don't leak which emails are registered" concern —
+that AC governs credential *mismatches*, not structurally invalid requests.
 
 ### Requirement 4: Session rehydration (`GET /api/auth/me`)
 
@@ -188,6 +216,30 @@ client immediately after a `POST /api/auth/logout` response, the `AuthController
 effect — the one thing worth checking end-to-end given logout has no server-side state in this
 spec.
 
+### Requirement 6: Email normalization (cross-cutting)
+
+**User story**: As the system, I need every code path that reads or writes `email` to treat case
+variants as the same identity, so that AUTH-001-AC-01's case-insensitive uniqueness guarantee is
+actually honored end-to-end, not just at the database constraint.
+
+**Added**: this requirement wasn't part of the original spec — it was added after
+AUTH-001-AC-10/AC-11 code review surfaced that `UserRepository.findByEmail` is a case-sensitive
+lookup (`WHERE email = ?`) against a plain `VARCHAR` column, while AUTH-001-AC-01's
+case-insensitivity is enforced only by a separate functional unique index (`lower(email)`). Without
+this fix, a user registered as `Foo@x.com` who later logs in as `foo@x.com` would incorrectly get
+AUTH-001-AC-11's "no such user" rejection.
+
+#### AUTH-001-AC-18 [AUTO]: Email normalized to lowercase before any persistence or lookup
+**Statement**: Before performing any persistence or lookup operation keyed on `email`, the
+`AuthService` shall normalize the submitted email to lowercase.
+
+**Rationale**: Normalizing once at the `AuthService` boundary — rather than teaching every
+repository query to be case-insensitive — makes every `findByEmail` call (both registration's
+duplicate check and login's user lookup) a plain equality comparison that's correct by
+construction. The database's functional unique index on `lower(email)` is retained, but demoted
+from the primary case-insensitivity mechanism to a race-condition safety net (per AUTH-001-AC-06's
+updated rationale above).
+
 ## Cross-references
 
 | Contract | Defined here | Used by |
@@ -201,6 +253,7 @@ spec.
 | Password policy (BCrypt, min length 12, no complexity rule) | `.claude/01-authentication/design-decisions.md` ("Password hashing", "Registration / login identifier") | This spec |
 | Role column, `USER`/`ADMIN` enum | `.claude/01-authentication/design-decisions.md` ("Access token", "Admin bootstrap") | This spec (column only); `backend_spec_003_admin_account_management` (future — first spec to act on the distinction) |
 | Email verification (explicitly not built) | `.claude/01-authentication/spec_candidates.md` | N/A — confirms no verification columns/endpoints belong in this spec |
+| Email normalization (lowercase at the `AuthService` boundary) | This spec (`AUTH-001-AC-18`) | `AUTH-001-AC-01` (uniqueness), `AUTH-001-AC-06` (duplicate check), `AUTH-001-AC-10`/`AUTH-001-AC-11` (login lookup) — all within this spec |
 
 ## Acceptance Criteria Summary
 
@@ -213,14 +266,16 @@ spec.
 - [x] AUTH-001-AC-07 [AUTO]: Password under 12 characters returns 400, no user created
 - [x] AUTH-001-AC-08 [AUTO]: Malformed email or blank display name returns 400, no user created
 - [x] AUTH-001-AC-09 [AUTO]: Registration response never includes password/hash/raw JWT
-- [ ] AUTH-001-AC-10 [AUTO]: Successful login sets the access-token cookie, returns 200 with user body
-- [ ] AUTH-001-AC-11 [AUTO]: Failed login (bad email or password) returns 401 uniformly, no cookie set
-- [ ] AUTH-001-AC-12 [AUTO]: Access-token claims are limited to user id and role
-- [ ] AUTH-001-AC-13 [AUTO]: Login response never includes password hash or raw JWT
+- [x] AUTH-001-AC-10 [AUTO]: Successful login sets the access-token cookie, returns 200 with user body
+- [x] AUTH-001-AC-11 [AUTO]: Failed login (bad email or password) returns 401 uniformly, no cookie set
+- [x] AUTH-001-AC-12 [AUTO]: Access-token claims are limited to user id and role
+- [x] AUTH-001-AC-13 [AUTO]: Login response never includes password hash or raw JWT
 - [ ] AUTH-001-AC-14 [AUTO]: `GET /api/auth/me` with a valid cookie returns the current user
 - [ ] AUTH-001-AC-15 [AUTO]: `GET /api/auth/me` with a missing/invalid/expired cookie returns 401
 - [ ] AUTH-001-AC-16 [AUTO]: Logout clears the access-token cookie, returns 200
 - [ ] AUTH-001-AC-17 [AUTO]: A session is actually unusable immediately after logout
+- [x] AUTH-001-AC-18 [AUTO]: Email is normalized to lowercase before any persistence/lookup operation
+- [ ] AUTH-001-AC-19 [AUTO]: Blank or missing login fields return 400, no cookie set
 
 ## Test case sketches
 
@@ -410,5 +465,37 @@ def "AUTH-001-AC-17: the session is unusable immediately after logout"() {
     when: "GET /api/auth/me is requested using the cookie returned by the logout response"
 
     then: "the response is 401 Unauthorized"
+}
+```
+
+```groovy
+def "AUTH-001-AC-18: registration persists a lowercase email regardless of input casing"() {
+    given: "a registration request with a mixed-case email"
+
+    when: "POST /api/auth/register is requested"
+
+    then: "the persisted user's email is the lowercase form"
+}
+```
+
+```groovy
+def "AUTH-001-AC-18: login succeeds with an email differing only by case from registration"() {
+    given: "a user registered with a mixed-case email"
+
+    when: "POST /api/auth/login is requested with the same email in a different case"
+
+    then: "the response is 200 OK, matching the user by normalized email"
+}
+```
+
+```groovy
+def "AUTH-001-AC-19: rejects login with a blank or missing email or password"() {
+    given: "a login request with a blank or missing email or password field"
+
+    when: "POST /api/auth/login is requested"
+
+    then: "the response is 400 Bad Request"
+
+    and: "no access-token cookie is set"
 }
 ```
