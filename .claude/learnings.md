@@ -132,6 +132,30 @@ is only needed to get a consistent, custom error-response shape across endpoints
 Spring's default `ProblemDetail`, pulling field errors from `BindingResult.getFieldErrors()`
 rather than `ConstraintViolationException.getConstraintViolations()`.
 
+## `Stream.toString()` doesn't describe its elements — collect it before putting it in a response
+
+**Context**: `GlobalExceptionHandler.handleMethodArgumentNotValidException` built its error message
+with `ex.getBindingResult().getFieldErrors().stream().toString()`, intending to list the actual
+field/message pairs for the client.
+
+**Why it silently produces garbage instead of failing loudly**: `Stream` has no overridden
+`toString()` — calling it falls back to `Object`'s default, which prints the class name and
+identity hash (`java.util.stream.ReferencePipeline$3@1b6d3586`), not the stream's contents. It
+compiles cleanly and returns a non-null `String`, so nothing about the mistake is visible at the
+call site — and it went unnoticed because the existing tests for that code path (`AC-07`/`AC-08`)
+only ever asserted the HTTP status, never inspected the response body's message content.
+
+**Fix**: terminate the stream with an actual collector before using the result:
+```java
+ex.getBindingResult().getFieldErrors().stream()
+        .collect(Collectors.groupingBy(FieldError::getField,
+                Collectors.mapping(FieldError::getDefaultMessage, Collectors.toList())));
+```
+**General tell**: any time a `Stream` (or another type with no meaningful `toString()`, like most
+functional-interface types) ends up directly in a message/log/response without an intervening
+`.collect()`/`.forEach()`/terminal operation, that's worth a second look — and worth a test that
+actually inspects the content produced, not just the status/outcome around it.
+
 ## `@WebMvcTest` and `@DataJpaTest` can't be stacked on one spec class
 
 **Context**: `AuthControllerSpec` started out with both `@WebMvcTest(controllers = AuthController)`
@@ -383,6 +407,96 @@ validResponse`. If the call-count assertion isn't actually load-bearing for the 
 status already proves the call happened), it's simplest to just not add it and keep the single stub,
 the way AC-05 does.
 
+## A Spock `Mock()`'s unstubbed call returns a silent default, not an error — an unexpected `null` downstream means "check every method actually invoked has a stub"
+
+**Context**: `AuthControllerSpec`'s `AUTH-001-AC-11` test posts to `/api/auth/login`, but its
+`given:` block stubbed `mockAuthService.register(_ as RegisterRequest) >> { throw new
+DuplicateEmailException(exceptionMessage) }` — copy-pasted from AC-06's registration test.
+`authService.login(...)` is what the controller actually calls, so it had no matching interaction
+at all; the mock silently returned `null` for it, and `AuthController.login()` NPE'd on
+`response.id()` instead of ever reaching the `401` the test expected.
+
+**Why this earns its own entry beyond "fix the copy-paste"**: this is the second distinct mechanism
+in this project where a Spock `Mock()`'s *default, silent* response for an unstubbed or unmatched
+call (`null`, for any object return type) surfaced as a confusing failure several layers
+downstream — an NPE/`500` from production code — rather than an obvious "no interaction matched"
+error from Spock itself (the other was the cardinality-only-interaction-with-no-`>>` entry above).
+Spock doesn't fail loudly when a call matches nothing; it just hands back the type's default and
+lets whatever calls it next discover the problem.
+
+**Fix / general tell**: when a `MockMvc`-driven test gets an NPE or an obviously-wrong value
+immediately after the call, before reaching for any other theory, check that *every* method the
+real code path actually invokes (not just the one the last similar test happened to stub) has a
+matching interaction — a mismatched method name, wrong argument matcher, or wrong mock entirely all
+look identical from the outside: a silent `null`.
+
+## `thrown(X)` must be a bare top-level statement — chaining `.message` onto it directly is a compile error
+
+**Context**: `AuthServiceSpec`'s duplicate-email/login-failure tests originally wrote
+`thrown(DuplicateEmailException).message == AuthService.MESSAGE_DUPLICATE_EMAIL` as a single line
+(after collapsing what looked like a redundant earlier `thrown(DuplicateEmailException)` statement
+above it). This fails to compile: `Exception conditions are only allowed as top-level statements.`
+
+**Why**: Spock only recognizes `thrown(SomeException)` as its special "exception condition" syntax
+when the call is the *entire* top-level statement, verbatim. The moment anything is chained onto it
+(`.message == ...`), it's no longer the whole statement — it's a sub-expression (the receiver of
+`.message`) — and Spock's AST transform explicitly rejects that shape rather than silently treating
+it as an ordinary method call.
+
+**Fix**: capture the exception into a local variable with a bare `thrown(...)` call, then assert on
+the variable separately:
+```groovy
+then: "DuplicateEmailException is thrown"
+    def ex = thrown(DuplicateEmailException)
+    ex.message == AuthService.MESSAGE_DUPLICATE_EMAIL
+```
+
+## A Spock block label without its colon isn't a compile error — it's silently reinterpreted as a method call, failing only at runtime
+
+**Context**: a parameterized `AuthControllerSpec` test wrote `and "validation errors are returned"`
+(no colon) instead of `and: "validation errors are returned"`. The spec compiled fine; every
+iteration of the test failed at runtime with `MissingMethodExceptionNoStack` pointing at that exact
+line.
+
+**Why**: Spock's AST transform recognizes a block label (`given:`/`when:`/`then:`/`and:`/`expect:`)
+by looking for an actual Groovy statement *label*, which requires the colon. Without it, `and "..."`
+is just an ordinary Groovy statement: a call to a method/variable named `and`, passed the string as
+its sole argument (Groovy's command-expression syntax permits calling a method without parens).
+Groovy doesn't verify a method actually exists at compile time (only `@CompileStatic`/`@TypeChecked`
+code does), so this compiles — and only blows up when that line executes and there's no `and()`
+method to call.
+
+**Fix / general tell**: if a Spock spec throws `MissingMethodException`/`MissingMethodExceptionNoStack`
+naming one of the block-label words (`given`, `when`, `then`, `and`, `expect`) at a line that looks
+like a label, check for a missing colon before looking anywhere else — it's a one-character typo
+that silently downgrades from a would-be compile error into a confusing runtime one.
+
+## An uncaught exception from `when:` fails the test immediately, no matter what the `then:` block was actually trying to check
+
+**Context**: an `AUTH-001-AC-18` test (mixed-case email normalized before the `findByEmail` call)
+stubbed `mockUserRepository.findByEmail(...) >> Optional.empty()` — just to keep the interaction
+simple, with no intention of testing login failure at all — then failed with an unhandled
+`LoginException` thrown from inside `AuthService.login`. The confusion: "I'm not checking the
+result of the method, so why is this being flagged?"
+
+**Why**: whether the test inspects a return value is irrelevant — if the `when:` block throws *any*
+exception that isn't explicitly expected via `thrown(...)` in `then:`, Spock fails the whole
+feature immediately with that exception, before any other `then:` condition (including interaction
+verifications) even gets evaluated. And the exception here was genuinely correct given the stub:
+telling `AuthService.login` "no user exists for this email" makes it throw `LoginException`,
+exactly as real login-not-found behavior should — the test just hadn't acknowledged that its own
+setup would trigger it.
+
+**Fix / general tell**: whenever a stub's return value would legitimately cause the production code
+to throw (even if that's not what the test is actually trying to exercise), add `thrown(...)` to
+`then:` alongside whatever else is being asserted — Spock requires every exception to be accounted
+for, not just the ones the test is specifically interested in:
+```groovy
+then: "call is made with lower case email, and login fails (no matching user)"
+    1 * mockUserRepository.findByEmail(MIXED_CASE_EMAIL.toLowerCase()) >> Optional.empty()
+    thrown(LoginException)
+```
+
 ## BCrypt is non-deterministic — never assert equality against a freshly-computed hash
 
 **Context**: `AuthServiceDataJpaSpec` (`AUTH-001-AC-05`, persisted-password-is-not-plaintext) tried
@@ -424,6 +538,22 @@ result.andExpect(content().string(not(containsString(MOCK_JWT))))
 Needs `not` added to the static Hamcrest import alongside `containsString`. General rule: any
 Hamcrest matcher gets negated by wrapping it in another matcher (`not`), never by applying a
 language-level boolean operator from the outside.
+
+## Hamcrest's `hasSize` only matches a `Collection` — a JSON object deserializes to a `Map`, which needs `aMapWithSize`
+
+**Context**: an `AC-19` test asserted `jsonPath('$.details', hasSize(errorCount))` against a
+response body shaped like `{"email": ["must not be blank"]}` — a JSON *object*, not an array.
+
+**Why it fails rather than just reading the wrong size**: `$.details` resolves (via Jayway
+JsonPath, through `jsonPath()`) to a `LinkedHashMap`, since the JSON value at that path is an
+object. Hamcrest's `hasSize` is typed to `Collection` and checks `instanceof Collection` before
+anything else — a `Map` isn't a `Collection` (even though it has its own `.size()`), so the match
+fails immediately with `Expected: a collection with size <N> but: was LinkedHashMap <{...}>`, not a
+size mismatch.
+
+**Fix**: use Hamcrest's Map-flavored equivalent instead — `org.hamcrest.Matchers.aMapWithSize(int)`
+— when the thing being measured is a JSON object (deserializes to a `Map`) rather than a JSON array
+(deserializes to a `List`/`Collection`).
 
 ## A `where:` table can't hand a mock a closure that closes over a `given:` local — and a closure *value* passed to `>>` isn't auto-invoked anyway
 
@@ -473,6 +603,52 @@ that actually serializes it into the final compact JWS string is `.compact()`, n
 doesn't exist on this interface for that purpose) — assigning the result of a chain ending in
 anything but `.compact()` to a `String` won't type-check.
 
+## `@Autowired`/`@Import` are no-ops on a plain Spock `Specification` with no Spring test context
+
+**Context**: `JwtBuilderSpec` (`AUTH-001-AC-12`) needed a real `JwtBuilder` to inspect actual JWT
+claims (`AuthControllerSpec` mocks `JwtBuilder` entirely, so it never produces a real token to
+decode). The spec had `@Import(ClockConfig)` on the class and `@Autowired Clock clock` as a field,
+then built `new JwtBuilder(clock, TEST_SECRET, 15)` in `setup()` — `clock` was `null` at runtime,
+NPE'ing inside `createJWT`'s `Instant.now(clock)`.
+
+**Why**: `@Import`/`@Autowired` only do anything when a Spring test context actually gets
+bootstrapped for that spec — via `@SpringBootTest`, a test-slice annotation (`@WebMvcTest`,
+`@DataJpaTest`), or `@ContextConfiguration`. `JwtBuilderSpec` had none of those, so Spock just ran it
+as a bare POJO. Unlike a missing bean inside an *actual* Spring context (which fails loudly, as the
+`@Value`-placeholder-resolution entries above show), `@Autowired` on a class with no container
+involved at all doesn't error — it just leaves the field at its default (`null`), with nothing
+enforcing it was ever going to be populated.
+
+**Fix**: don't reach for Spring DI to test a plain class — construct what it needs directly, same as
+this project's existing `Clock` convention already calls for in Spock specs:
+```groovy
+Clock clock = Clock.systemDefaultZone()
+```
+**General tell**: if a Spock spec has `@Autowired`/`@Import`/`@Value` but no `@SpringBootTest`-family
+annotation anywhere on the class, those annotations are dead weight — either add the missing context
+annotation, or (usually simpler, for a single collaborator like this) construct the real thing by
+hand instead.
+
+## Groovy's `as` can't coerce a `String` into a `SecretKey` — rebuild the key the same way it was signed
+
+**Context**: same `JwtBuilderSpec`, parsing the JWT back to inspect its claims used
+`Jwts.parser().verifyWith(TEST_SECRET as SecretKey)...`, where `TEST_SECRET` is a plain Base64
+`String`.
+
+**Why**: Groovy's `as` coercion only works when there's an actual conversion path to the target
+type (a constructor, an `asType`, or a built-in coercion) — `String` has no relationship to
+`SecretKey` at all, so this throws `GroovyCastException` rather than producing a working key. It's
+the same family of mistake as the "stub a `Role` field with a plain `String`" entry above: Groovy
+happily lets you *write* the cast, but there's nothing behind it at runtime.
+
+**Fix**: build the key exactly the way `JwtBuilder` itself does when signing — decode the Base64
+string into bytes and wrap it:
+```groovy
+Keys.hmacShaKeyFor(Base64.getDecoder().decode(TEST_SECRET))
+```
+Verifying/parsing a signed token needs the identical key *material and shape* used to sign it —
+there's no shortcut coercion from the raw secret string.
+
 ## Minting the JWT signing secret has three separate, independent footguns — fixing one doesn't fix the others
 
 **Context**: getting `app.jwt.secret`'s local-dev default right in `application.yaml` took three
@@ -499,6 +675,140 @@ these three unrelated reasons — worth generating a real one with a tool (`open
 rather than hand-typing a string, both to sidestep all three at once and because a real secret
 shouldn't be composed by eye in the first place.
 
+## Logging is already on the classpath transitively — code against `org.slf4j.Logger`, not `java.util.logging`
+
+**Context**: came up while fixing `AUTH-001-AC-11` (the `GlobalExceptionHandler` was forwarding
+`LoginException`'s specific message — "user doesn't exist" vs "wrong password" — straight to the
+client; the fix needed the *reason* logged server-side instead of returned in the response body).
+
+**Why no new dependency was needed**: every `spring-boot-starter-*` in `build.gradle.kts`
+(`-webmvc`, `-data-jpa`, `-security`, etc.) transitively pulls in `spring-boot-starter-logging`,
+which bundles both the SLF4J API and Logback as its binding. Checked `build.gradle.kts` for any
+exclusion of it — none — so it's present with zero lines added.
+
+**Why `org.slf4j.Logger`, not `java.util.logging.Logger` or `ch.qos.logback.classic.Logger`
+directly**: Logback implements the SLF4J API rather than exposing its own public API for app code
+to call — SLF4J is the facade app code is meant to hold, Logback is just the backend Spring Boot
+wires in underneath. `java.util.logging` is the JDK's unrelated built-in logger; nothing in a
+Spring Boot app expects to see it.
+
+**Pattern**:
+```java
+private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+...
+log.warn("Login failed for {}: {}", email, "wrong password"); // .warn, not .error — a failed login is routine, expected traffic, not an application fault
+```
+Never log the raw password itself, even on a mismatch.
+
+## A "uniform" failure response can still leak information through timing, even with identical status/body
+
+**Context**: code review of `AuthService.login` (`AUTH-001-AC-11`) after the `AuthServiceDataJpaSpec`
+gaps were closed. The method short-circuits with `LoginException` the moment `findByEmail` comes
+back empty, but calls `passwordEncoder.matches(...)` (BCrypt) before throwing when the email exists
+but the password doesn't match.
+
+**Why this is a real gap despite every test passing**: AC-11's whole point is that the `401`
+response must not reveal *which* of "no such email" vs "wrong password" happened. Every test that
+exists (`AuthControllerSpec`, `AuthServiceSpec`, `AuthServiceDataJpaSpec`) only asserts the
+response's status/body/cookies — all identical either way, so they all pass. But BCrypt is
+deliberately slow (~100ms, by design, to resist brute-forcing), and only the wrong-password branch
+pays that cost; the no-such-email branch returns almost immediately. That timing gap is itself a
+side channel an attacker can use to enumerate registered emails, independent of the response being
+byte-for-byte identical. None of the three test layers could ever have caught this — they're all
+response-shape assertions, and this is a response-*time* property.
+
+**Fix / general takeaway**: when an AC requires a uniform response across different failure
+reasons, treat "uniform" as including wall-clock cost, not just status code and body — any
+early-return branch that *skips* an expensive operation (password hashing, crypto comparisons,
+anything deliberately slow) the other branch pays is a candidate. The standard mitigation is to
+always perform the expensive comparison — e.g. `passwordEncoder.matches(password, DUMMY_HASH)`
+against a constant precomputed hash — even on the branch that's going to reject regardless of the
+result, so both paths cost the same regardless of which one is actually taken.
+
+**A dummy hash has to actually look like a real one, or the mitigation silently does nothing**:
+implementing the fix above, `DUMMY_HASH` was first set to a password-shaped but wrong-length
+string. `BCryptPasswordEncoder.matches()` checks the *shape* of the encoded value with a regex
+(`$2a$10$` + exactly 53 further BCrypt-base64 characters) **before** doing any real hashing — if
+that check fails, it logs `WARN ... Encoded password does not look like BCrypt` and returns
+`false` immediately, skipping the actual (deliberately slow) comparison entirely. So a
+plausible-looking but malformed dummy hash makes the "constant-time" branch near-instant —
+defeating the mitigation while every functional test still passes, since they only assert
+`LoginException` was thrown, never the timing. Only caught here by deliberately re-running with
+`--info` logging and spotting the `WARN`. Fix: the dummy hash must be a real, well-formed BCrypt
+output — generate one once via `new BCryptPasswordEncoder().encode(...)` and hardcode the result,
+rather than hand-typing something merely hash-*shaped*.
+
+## A Spock `Spy` to verify an interaction on a real collaborator is usually a sign the check belongs somewhere else
+
+**Context**: `AuthServiceDataJpaSpec`'s AC-11 test tried asserting `1 * passwordEncoder.matches(...)`
+to prove the dummy-hash mitigation above actually fires — but that spec constructs
+`passwordEncoder` with `new BCryptPasswordEncoder()`, a real instance. Spock's interaction syntax
+only works against objects it's tracking (`Mock()`/`Stub()`/`Spy()`); on a plain `new`-constructed
+object it reports `0 invocations`, even though the real call demonstrably happens.
+
+**Why reaching for `Spy()` here wasn't the right fix**: Spock's own docs carry an explicit warning
+on `Spy` — "think twice before using this feature; it might be better to change the design of the
+code under specification." The smell it's pointing at: needing to spy on a real collaborator to
+verify a call happened usually means the test is in the wrong place, not that the test needs a
+heavier tool. `AuthServiceSpec` (a plain unit spec, no DB) already declares
+`PasswordEncoder mockPasswordEncoder = Mock()` for this exact collaborator, and already has the
+matching "login fails for unknown user" scenario — a plain `Mock()`'s interaction verification just
+works there, no `Spy` required.
+
+**Fix / general tell**: before reaching for `Spy()` to verify an interaction, check whether a
+sibling spec already mocks the exact same collaborator for a unit-level version of the same
+scenario — the interaction assertion almost always belongs there, leaving the
+`@DataJpaTest`/real-object spec to assert only the things that genuinely need the real
+implementation (e.g. real DB state).
+
+## Spring Data repositories only ever throw `DataAccessException` subtypes — catch narrowly, not `Exception`
+
+**Context**: came up deciding what, if anything, to wrap around `userRepository.saveAndFlush(...)`
+and other repository calls in `AuthService`, beyond the existing `DataIntegrityViolationException`
+catch for duplicate emails.
+
+**Why `DataAccessException`, not raw JDBC/Hibernate exceptions**: Spring Data repositories are
+`@Repository`-annotated, so `PersistenceExceptionTranslationPostProcessor` already translates every
+low-level JDBC/Hibernate failure into Spring's own `DataAccessException` hierarchy before it ever
+reaches application code — a raw `SQLException` never surfaces here.
+
+**Why not just catch `Exception` everywhere and be done with it**: it also catches bugs that have
+nothing to do with the database (an NPE from unrelated code in the same method) and silently
+reinterprets them as "a DB problem" — exactly the kind of masking that makes a real bug harder to
+find later (this is also why SonarQube flags broad `Exception`/`Throwable` catches).
+
+**The actual dividing line**: only catch narrowly where the exception maps to a *specific
+client-facing outcome* — `DataIntegrityViolationException` → `409` for a unique-constraint hit
+(duplicate email) is exactly that; `OptimisticLockingFailureException` would be the equivalent if
+`User` ever gets `@Version`-based optimistic locking. Infra-level failures
+(`DataAccessResourceFailureException`, `CannotGetJdbcConnectionException`, `QueryTimeoutException`
+— DB unreachable, connection pool exhausted) aren't worth catching per call, because there's
+nothing more specific to do with them than a generic `500` anyway. Handle those with one catch-all
+`@ExceptionHandler(Exception.class)` in `GlobalExceptionHandler` instead of scattering speculative
+`try`/`catch` through every repository call.
+
+## Adding a catch-all `@ExceptionHandler` silently removes Spring's own unhandled-exception logging — log it yourself
+
+**Context**: after adding `@ExceptionHandler(Exception.class)` to `GlobalExceptionHandler` (per the
+entry above), the question came up of whether anything still logs the real exception, or whether
+the handler needs to do it itself.
+
+**Why nothing logs it for free**: once a `@RestControllerAdvice` method resolves an exception by
+returning a response, Spring MVC treats it as fully handled — it never falls through to the
+default unhandled-exception path (the `WARN`-level logging `DispatcherServlet`/the default error
+controller would otherwise do). From the framework's point of view nothing went wrong: a method
+caught the exception and produced a `200`-shaped response for it (just with a `500` status). Adding
+the catch-all is what makes that happen — and it silently removes the only logging that exception
+used to get.
+
+**Fix**: log explicitly inside the handler, passing the `Throwable` itself (not just
+`ex.getMessage()`) so the stack trace actually prints:
+```java
+LOG.error("Unhandled exception", ex);
+```
+Use `.error()` here specifically — this bucket is genuinely unexpected faults, unlike the `.warn()`
+calls used for routine failed-login/duplicate-email outcomes in the entry above.
+
 ## Not every SonarQube/SonarLint rule honors `@SuppressWarnings` — some only resolve via the IDE's own "mark as" action
 
 **Context**: added `@SuppressWarnings("java:S2143")` above `JwtBuilder.createJWT` to suppress a
@@ -515,3 +825,26 @@ for a limited subset of rules — others are structural or security-hotspot-styl
 SonarLint panel or the SonarQube UI, never through a code annotation. If a clean, compiling file
 still shows a finding after a correctly-formatted suppression, that's the more likely explanation
 than a formatting mistake.
+
+## IntelliJ's "Method may be static" is a false positive on a Spock helper that stubs interactions
+
+**Context**: `AuthServiceSpec`'s private `mockUserResponse(User mockUser, UUID id) { mockUser.getEmail()
+>> EMAIL; ... }` helper (shared by the registration-success and login-success tests) got flagged by
+IntelliJ as "may be static." Making it `static` broke every test that calls it, with a runtime
+error: `Interactions cannot be declared in static scope.`
+
+**Why the inspection gets this wrong**: IntelliJ's check only looks at whether a method body reads
+or writes a field declared on the enclosing class. `mockUserResponse` only touches its own
+parameters, so the inspection concludes it needs no `this` and offers to make it `static`. But a
+`>>` line isn't ordinary Groovy — Spock's compile-time AST transform rewrites it into a call that
+registers the stub against the *currently executing feature's* interaction-recording context
+(`SpecificationContext`), which lives on the `Specification` instance. That's real instance-state
+access IntelliJ's field-usage scan can't see, because it only exists after Spock's transform runs.
+A `static` method has no `this` at all, so there's nothing for Spock to attach the interaction to.
+
+**Fix**: don't make it static. Clear the warning with IntelliJ's own quick-fix instead — place the
+cursor on the method, `Alt+Enter` on the warning, choose "Suppress for method." That inserts the
+correct Groovy-inspection suppression annotation above just that method, leaving the inspection
+active for everything else in the file. Same category as the `JwtBuilder`/SonarLint entry above —
+a framework-specific blind spot in static analysis, worth suppressing locally once confirmed to be
+a false positive rather than disabling the inspection project-wide.

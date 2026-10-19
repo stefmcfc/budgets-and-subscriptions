@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `POST /api/auth/login`: authenticates an existing user against their stored BCrypt hash and
+  issues the same signed HS256 JWT access-token cookie registration does, returning `200` with the
+  user's id/email/displayName/role — the response body never includes the password hash or the raw
+  token (AUTH-001-AC-10, AC-12, AC-13).
+- Failed login (unknown email, wrong password, or a blank/missing email or password) responds
+  uniformly, without revealing which credential was wrong; login normalizes email to lowercase
+  before lookup, matching registration (AUTH-001-AC-11, AC-18, AC-19).
+
+### Fixed
+- `GlobalExceptionHandler`'s `400` validation-error response now returns the real per-field
+  messages instead of a Java object's identity hash.
+
 ## [0.2.0] - 2026-10-14
 
 ### Added
