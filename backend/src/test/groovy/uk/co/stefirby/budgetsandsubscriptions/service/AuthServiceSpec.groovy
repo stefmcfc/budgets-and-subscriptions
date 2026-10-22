@@ -6,9 +6,10 @@ import spock.lang.Specification
 import spock.lang.Subject
 import uk.co.stefirby.budgetsandsubscriptions.dto.LoginRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.RegisterRequest
-import uk.co.stefirby.budgetsandsubscriptions.dto.RegisterResponse
+import uk.co.stefirby.budgetsandsubscriptions.dto.UserResponse
 import uk.co.stefirby.budgetsandsubscriptions.exception.DuplicateEmailException
 import uk.co.stefirby.budgetsandsubscriptions.exception.LoginException
+import uk.co.stefirby.budgetsandsubscriptions.exception.UserException
 import uk.co.stefirby.budgetsandsubscriptions.model.Role
 import uk.co.stefirby.budgetsandsubscriptions.model.User
 import uk.co.stefirby.budgetsandsubscriptions.repository.UserRepository
@@ -83,13 +84,13 @@ class AuthServiceSpec extends Specification {
 
         when: "register is called with new user"
             RegisterRequest regRequest = new RegisterRequest(MIXED_CASE_EMAIL, DUMMY_PASSWORD, DISPLAY_NAME)
-            RegisterResponse response = authService.register(regRequest)
+            UserResponse response = authService.register(regRequest)
 
         then: "response fields are set as expected"
-            response.email == EMAIL
-            response.id == randomUuid
-            response.displayName == DISPLAY_NAME
-            response.role == Role.USER.toString()
+            response.email() == EMAIL
+            response.id() == randomUuid
+            response.displayName() == DISPLAY_NAME
+            response.role() == Role.USER.toString()
 
         and: "AUTH-001-AC-18: DB interactions only ever use lower case email"
             1 * mockUserRepository.findByEmail(MIXED_CASE_EMAIL.toLowerCase()) >> Optional.empty()
@@ -153,16 +154,50 @@ class AuthServiceSpec extends Specification {
 
         when: "login is called"
             LoginRequest loginRequest = new LoginRequest(MIXED_CASE_EMAIL, DUMMY_PASSWORD)
-            RegisterResponse response = authService.login(loginRequest)
+            UserResponse response = authService.login(loginRequest)
 
         then: "response fields are set as expected"
-            response.email == EMAIL
-            response.id == randomUuid
-            response.displayName == DISPLAY_NAME
-            response.role == Role.USER.toString()
+            response.email() == EMAIL
+            response.id() == randomUuid
+            response.displayName() == DISPLAY_NAME
+            response.role() == Role.USER.toString()
 
         and: "AUTH-001-AC-18: DB interactions only ever use lower case email"
             1 * mockUserRepository.findByEmail(MIXED_CASE_EMAIL.toLowerCase()) >> Optional.<User>of(mockUser)
+    }
+
+    //-----------------------
+    //  Get User Details By Id tests
+    //=======================
+
+    def "AUTH-001-AC-25: given user exists then details are returned"() {
+        given: "user exists"
+        UUID randomUuid = UUID.randomUUID()
+        String uuid = randomUuid.toString()
+        mockUserResponse(mockUser,randomUuid)
+        mockUserRepository.findById(randomUuid) >> Optional.<User>of(mockUser)
+
+        when: "getUserById is called"
+        UserResponse response = authService.getUserDetailsById(uuid)
+
+        then: "response fields are set as expected"
+        response.email() == EMAIL
+        response.id() == randomUuid
+        response.displayName() == DISPLAY_NAME
+        response.role() == Role.USER.toString()
+    }
+
+    def "AUTH-001-AC-25: given user does not exist then exception is thrown"() {
+        given: "user does not exist"
+        UUID randomUuid = UUID.randomUUID()
+        String uuid = randomUuid.toString()
+        mockUserRepository.findById(randomUuid) >> Optional.empty()
+
+        when: "getUserById is called"
+        authService.getUserDetailsById(uuid)
+
+        then: "UserException is thrown"
+        thrown(UserException)
     }
 
 }

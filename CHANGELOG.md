@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Failed login (unknown email, wrong password, or a blank/missing email or password) responds
   uniformly, without revealing which credential was wrong; login normalizes email to lowercase
   before lookup, matching registration (AUTH-001-AC-11, AC-18, AC-19).
+- `GET /api/auth/me`: returns the current user's id/email/displayName/role for a valid session,
+  `401` for a missing, malformed, expired, or invalid-signature one (AUTH-001-AC-14, AC-15).
+- `JwtAuthenticationFilter`: populates Spring Security's `SecurityContextHolder` from the
+  `access_token` cookie ahead of the authorization check, so `.authenticated()`-gated routes work
+  off real Spring Security authentication rather than ad hoc controller-side cookie parsing; a
+  missing cookie leaves the request unauthenticated rather than rejected outright (so the
+  `permitAll` login/register routes are unaffected), and a malformed/expired/invalid-signature
+  cookie is caught rather than surfacing as a `500` (AUTH-001-AC-20 through AC-23).
 
 ### Fixed
 - `GlobalExceptionHandler`'s `400` validation-error response now returns the real per-field

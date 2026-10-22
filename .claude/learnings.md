@@ -239,7 +239,7 @@ where the JWT secret's default had separately been removed on purpose (forcing r
 supply one) — and the full context can't start without it.
 
 **Why the other specs didn't catch this**: each test that still passed sidesteps `app.jwt.secret`
-entirely rather than resolving it: `AuthControllerSpec` (`@WebMvcTest`) replaces `JwtBuilder` with a
+entirely rather than resolving it: `AuthControllerSpec` (`@WebMvcTest`) replaces `JwtService` with a
 `@SpringBean` mock, so its real constructor (and the `@Value` on it) never runs; `AuthServiceDataJpaSpec`/
 `UserSpec` (`@DataJpaTest`) only load the JPA slice, which never touches `app.jwt.secret` at all.
 A plain `@SpringBootTest` with no test slice is the *only* place that actually resolves every
@@ -310,6 +310,41 @@ tests — `@WebMvcTest` pulls in the real `SecurityConfig` from `main`, which is
   is `SameSite=Strict` on the cookies (`design-decisions.md`'s "Transport & CSRF"), not Spring's
   token-based mechanism. Leaving Spring's default CSRF protection on means fighting a mechanism
   the design already decided not to use.
+
+## Spring Security's `authenticated()` check runs in the filter chain, before `DispatcherServlet` — a cold controller breakpoint isn't necessarily a code bug, and `@RestControllerAdvice` can't catch what a filter throws either
+
+**Context**: debugging a `401` on `GET /api/auth/me` where a breakpoint inside
+`AuthController.getCurrentUser` never triggered, even attached in the debugger. Root cause:
+`SecurityConfig`'s `.requestMatchers("/api/**").authenticated()` rejects the request before Spring
+MVC ever routes to a controller — and at the time, nothing in the app populated the
+`SecurityContext` from the request's cookie (the controller was parsing it manually itself,
+entirely bypassing Spring Security's own mechanism).
+
+**Why the breakpoint never hits**: Spring Security's filter chain is a genuinely separate layer
+that runs *before* `DispatcherServlet` even starts routing. `.authenticated()` is evaluated against
+whatever `Authentication` is already sitting in `SecurityContextHolder` at that point — if nothing
+populated it, the request is rejected by Spring Security's own `AuthenticationEntryPoint` right
+there, and the controller method is never invoked. A quiet `401` with no controller-side logging
+and a cold breakpoint is the normal symptom of this, not evidence the handler code itself is wrong.
+
+**The same boundary trips up exception handling, not just debugging**: `@RestControllerAdvice`/
+`@ExceptionHandler` methods are scoped to exceptions thrown while `DispatcherServlet` is handling a
+controller method (including validation/binding). They cannot see an exception thrown inside a
+servlet `Filter` — filters run earlier in the chain, outside Spring MVC's dispatch entirely. Moving
+JWT-parsing logic out of the controller and into a custom `OncePerRequestFilter` (so something
+actually populates `SecurityContext` before the `authenticated()` check runs) means any exception
+the parsing throws (`JwtParserException`, or jjwt's own `ExpiredJwtException`/`SignatureException`/
+`MalformedJwtException`) has to be caught *inside the filter itself* — `GlobalExceptionHandler`'s
+existing mappings for those exact exception types quietly become dead code the moment the only
+caller moves into a filter, even though the exception types and messages haven't changed at all.
+
+**Takeaway**: when a route needs Spring Security's own `authenticated()` gate to actually pass,
+something has to run *before* that check and explicitly set an `Authentication` into the
+`SecurityContext` (a custom filter registered via `addFilterBefore`, or one of Spring Security's own
+built-in mechanisms) — manual per-controller parsing of a cookie/header isn't equivalent, no matter
+how correct its own logic is, because it runs too late in the pipeline to satisfy a security-layer
+rule. And once that parsing logic lives in a filter rather than a controller, its exception handling
+has to move with it — it can't stay behind in `GlobalExceptionHandler`.
 
 ## `MockMvc` absorbs exceptions into the response — `thrown()` never sees them
 
@@ -592,7 +627,7 @@ existing positive and negative specs (`AUTH-001-AC-05`/`06`/`07`/`08`), each alr
 
 ## JJWT 0.12.x: `signWith`'s argument order flipped, and `.compact()` (not `.build()`) produces the token string
 
-**Context**: building `JwtBuilder` against `jjwt-api:0.12.6`, `.signWith(Jwts.SIG.HS256, secretKey)`
+**Context**: building `JwtService` against `jjwt-api:0.12.6`, `.signWith(Jwts.SIG.HS256, secretKey)`
 failed to resolve, and `.build()` didn't return a `String`.
 
 **Why**: the legacy JJWT API (pre-0.12) was `signWith(SignatureAlgorithm, Key)` — algorithm first.
@@ -603,17 +638,63 @@ that actually serializes it into the final compact JWS string is `.compact()`, n
 doesn't exist on this interface for that purpose) — assigning the result of a chain ending in
 anything but `.compact()` to a `String` won't type-check.
 
+## JJWT's builder only has dedicated setters for JWT's *registered* claims — custom claims always go through `.claim()`/`.claims()`
+
+**Context**: `JwtService.createJWT` originally built its payload entirely through
+`claims.put("sub", userId); claims.put("role", role);` passed to `.claims(claims)`. Came up when
+deciding whether to switch the `sub` entry to the builder's dedicated `.subject(userId)` method
+instead.
+
+**Why `.subject(...)` and `.claims(map)` produce an identical token for `sub`, but `role` has no
+equivalent**: RFC 7519 defines a fixed set of *registered* claims — `iss`, `sub`, `aud`, `exp`,
+`nbf`, `iat`, `jti` — and JJWT's builder has a typed convenience method for each one
+(`.issuer()`, `.subject()`, `.expiration()`, etc.). Those methods just write the same key into the
+same underlying claims map the generic `.claims()`/`.claim()` methods write to — so
+`.subject(userId)` and `claims.put("sub", userId)` end up byte-for-byte identical in the
+serialized token, and `claims.getSubject()` reads either one back correctly regardless of which
+method set it. `role` isn't one of the registered claims — it's this app's own addition — so
+there's no `.role(...)` method to reach for; the generic `.claim("role", role)` mechanism is the
+*only* way to add it, by design, not an oversight.
+
+**Takeaway**: prefer the dedicated setter for any registered claim (`.subject()` over a raw
+`"sub"` map entry) — it's self-documenting and type-checked (`.subject(String)` can't silently
+accept the wrong type or a typo'd key the way a `Map<String, Object>` entry can) — and reserve the
+generic `.claim()`/`.claims()` calls for genuinely custom, app-specific claims with no registered
+equivalent.
+
+## JJWT validates `exp` during parsing itself — no manual expiry comparison needed, but its internal clock isn't the one this project already injects
+
+**Context**: writing `JwtService`'s token-parsing method for `AUTH-001-AC-15` (expired session →
+`401`), the question came up of whether expiry needs checking by hand against
+`Instant.now(clock)` before trusting the claims.
+
+**Why no manual check is needed**: `Jwts.parser()....parseSignedClaims(jwt)` validates the `exp`
+claim against "now" as part of parsing itself, and throws `io.jsonwebtoken.ExpiredJwtException` if
+it's already passed — before the payload is ever handed back. That exception extends
+`ClaimJwtException`, which extends `JwtException`, so a single `catch (JwtException e)` (or
+`@ExceptionHandler(JwtException.class)`) already covers it alongside signature/format failures,
+with no extra code.
+
+**The one nuance worth knowing**: the clock JJWT uses for that internal `exp` check is its *own*
+`io.jsonwebtoken.Clock` interface — a completely different type from the `java.time.Clock` this
+project already injects everywhere else (`ClockConfig`). It defaults to the real system clock
+unless explicitly overridden via `.clock(...)` on the parser builder. There's no need to wire that
+up, though: for a deterministic expired-token test, the simplest route is to mint the token using
+`JwtService`'s *existing* `java.time.Clock` injection fixed to a point in the past, then parse it
+normally with a real-clock parser — real "now" is already past that token's `exp`, so
+`ExpiredJwtException` fires without ever touching JJWT's internal clock mechanism.
+
 ## `@Autowired`/`@Import` are no-ops on a plain Spock `Specification` with no Spring test context
 
-**Context**: `JwtBuilderSpec` (`AUTH-001-AC-12`) needed a real `JwtBuilder` to inspect actual JWT
-claims (`AuthControllerSpec` mocks `JwtBuilder` entirely, so it never produces a real token to
+**Context**: `JwtServiceSpec` (`AUTH-001-AC-12`) needed a real `JwtService` to inspect actual JWT
+claims (`AuthControllerSpec` mocks `JwtService` entirely, so it never produces a real token to
 decode). The spec had `@Import(ClockConfig)` on the class and `@Autowired Clock clock` as a field,
-then built `new JwtBuilder(clock, TEST_SECRET, 15)` in `setup()` — `clock` was `null` at runtime,
+then built `new JwtService(clock, TEST_KEY, 15)` in `setup()` — `clock` was `null` at runtime,
 NPE'ing inside `createJWT`'s `Instant.now(clock)`.
 
 **Why**: `@Import`/`@Autowired` only do anything when a Spring test context actually gets
 bootstrapped for that spec — via `@SpringBootTest`, a test-slice annotation (`@WebMvcTest`,
-`@DataJpaTest`), or `@ContextConfiguration`. `JwtBuilderSpec` had none of those, so Spock just ran it
+`@DataJpaTest`), or `@ContextConfiguration`. `JwtServiceSpec` had none of those, so Spock just ran it
 as a bare POJO. Unlike a missing bean inside an *actual* Spring context (which fails loudly, as the
 `@Value`-placeholder-resolution entries above show), `@Autowired` on a class with no container
 involved at all doesn't error — it just leaves the field at its default (`null`), with nothing
@@ -631,8 +712,8 @@ hand instead.
 
 ## Groovy's `as` can't coerce a `String` into a `SecretKey` — rebuild the key the same way it was signed
 
-**Context**: same `JwtBuilderSpec`, parsing the JWT back to inspect its claims used
-`Jwts.parser().verifyWith(TEST_SECRET as SecretKey)...`, where `TEST_SECRET` is a plain Base64
+**Context**: same `JwtServiceSpec`, parsing the JWT back to inspect its claims used
+`Jwts.parser().verifyWith(TEST_KEY as SecretKey)...`, where `TEST_KEY` is a plain Base64
 `String`.
 
 **Why**: Groovy's `as` coercion only works when there's an actual conversion path to the target
@@ -641,10 +722,10 @@ type (a constructor, an `asType`, or a built-in coercion) — `String` has no re
 the same family of mistake as the "stub a `Role` field with a plain `String`" entry above: Groovy
 happily lets you *write* the cast, but there's nothing behind it at runtime.
 
-**Fix**: build the key exactly the way `JwtBuilder` itself does when signing — decode the Base64
+**Fix**: build the key exactly the way `JwtService` itself does when signing — decode the Base64
 string into bytes and wrap it:
 ```groovy
-Keys.hmacShaKeyFor(Base64.getDecoder().decode(TEST_SECRET))
+Keys.hmacShaKeyFor(Base64.getDecoder().decode(TEST_KEY))
 ```
 Verifying/parsing a signed token needs the identical key *material and shape* used to sign it —
 there's no shortcut coercion from the raw secret string.
@@ -761,6 +842,29 @@ scenario — the interaction assertion almost always belongs there, leaving the
 `@DataJpaTest`/real-object spec to assert only the things that genuinely need the real
 implementation (e.g. real DB state).
 
+## The "uniform response regardless of cause" principle isn't login-specific — it recurs anywhere one endpoint can fail for several different reasons
+
+**Context**: deciding what `GlobalExceptionHandler`'s planned `JwtException`/`JwtParserException`
+handler should return for `/me`'s session-validation failures (`AUTH-001-AC-15`) — expired,
+malformed, bad signature, missing subject, or (once added) a valid token naming a now-deleted user
+all currently produce exceptions with distinct, descriptive messages.
+
+**Why that's the same decision as `AUTH-001-AC-11` all over again**: `AuthService.login` already
+collapses "no such email" and "wrong password" into one identical `401`/message specifically so
+the response itself can't be used to tell the two apart. The same reasoning applies here —
+returning each JWT failure's real exception message would tell a caller whether their token's
+signature actually validated (just expired) versus was rejected outright, a meaningful signal to
+anyone probing a forged or stolen token, not just internal implementation detail. It's also the
+same category of leak already fixed once in this file's catch-all `Exception` handler, which used
+to return `ex.getMessage()` directly — third-party/library exception text is never written with
+client consumption in mind.
+
+**Takeaway**: whenever a new multi-cause failure path shows up (this is now the second one in this
+codebase), default to one fixed, generic message for the whole family of causes, log the real
+exception server-side only, and treat "has this AC's response already hidden its real cause?" as a
+standing question for every new `@ExceptionHandler`, not something to re-derive from scratch each
+time.
+
 ## Spring Data repositories only ever throw `DataAccessException` subtypes — catch narrowly, not `Exception`
 
 **Context**: came up deciding what, if anything, to wrap around `userRepository.saveAndFlush(...)`
@@ -809,6 +913,16 @@ LOG.error("Unhandled exception", ex);
 Use `.error()` here specifically — this bucket is genuinely unexpected faults, unlike the `.warn()`
 calls used for routine failed-login/duplicate-email outcomes in the entry above.
 
+**Confirmed again on a non-catch-all handler**: adding a dedicated
+`@ExceptionHandler(JwtException.class)` (for `/me`'s session-validation failures) hits the
+identical silence — it's not specific to the catch-all `Exception` handler; *any*
+`@ExceptionHandler` method that resolves an exception into a response removes Spring's default
+logging for it. This codebase's actual convention, visible in `LoginException`/
+`DuplicateEmailException` (never logged in `GlobalExceptionHandler` at all), is to log once, at
+the point of detection in the service/component that throws — e.g. `JwtService` logging a `WARN`
+right before/as it lets a JWT failure propagate — and keep `GlobalExceptionHandler` itself logging
+only the true catch-all case, where there was no earlier opportunity to log.
+
 ## Not every SonarQube/SonarLint rule honors `@SuppressWarnings` — some only resolve via the IDE's own "mark as" action
 
 **Context**: added `@SuppressWarnings("java:S2143")` above `JwtBuilder.createJWT` to suppress a
@@ -845,6 +959,256 @@ A `static` method has no `this` at all, so there's nothing for Spock to attach t
 **Fix**: don't make it static. Clear the warning with IntelliJ's own quick-fix instead — place the
 cursor on the method, `Alt+Enter` on the warning, choose "Suppress for method." That inserts the
 correct Groovy-inspection suppression annotation above just that method, leaving the inspection
-active for everything else in the file. Same category as the `JwtBuilder`/SonarLint entry above —
+active for everything else in the file. Same category as the `JwtService`/SonarLint entry above —
 a framework-specific blind spot in static analysis, worth suppressing locally once confirmed to be
 a false positive rather than disabling the inspection project-wide.
+
+## A field annotated `@Mock` isn't a Spock mock unless it's also created via `Mock()`/`Stub()`
+
+**Context**: `JwtAuthenticationFilterSpec` declared `@Mock MockFilterChain chain = new MockFilterChain()`
+and then asserted `1 * chain.doFilter(request, response)` in a `then:` block. The real call
+happened (confirmed via the production code), but the test failed with `Too few invocations for:
+1 * chain.doFilter(request, response) (0 invocations)`.
+
+**Why**: the `@Mock` in play was `org.mockito.Mock`, not a Spock annotation, and this project's
+specs run under Spock's own runner — no `MockitoJUnitRunner`/`MockitoExtension` anywhere in the
+mix — so that annotation is never processed; it's inert decoration. The field itself was
+initialized as a real, concrete `MockFilterChain` instance, not something built through Spock's
+`Mock()`/`Stub()` factory methods. Spock can only record `N * obj.method(...)`-style interactions
+against objects it created as doubles — a genuine concrete object is invisible to its interaction
+bookkeeping no matter how many times its methods are actually called, so the count comes back zero.
+
+**Fix**: use a real Spock mock of the relevant interface — `FilterChain chain = Mock(FilterChain)`
+(the `jakarta.servlet.FilterChain` interface the production code depends on, not the concrete
+`MockFilterChain` class) — and drop the unused `org.mockito.Mock` import entirely. **General
+tell**: if `N * obj.method(...)` reports zero invocations despite the method clearly having run,
+check whether `obj` was actually created via Spock's `Mock()`/`Stub()`/`Spy()`, not just annotated
+or assigned a real instance.
+
+## `SecurityContextHolder.clearContext()` leaves `.context.authentication` as `null`, not a "not authenticated" object
+
+**Context**: `JwtAuthenticationFilterSpec`'s "no cookie present" test asserted
+`!SecurityContextHolder.context.authentication.authenticated` after `clearContext()` and expected
+a clean `false`. Accessing `.authentication` after the clear returned `null` instead, which would
+NPE on the `.authenticated` navigation (Groovy's `!null.foo` throws, it doesn't evaluate to `true`).
+
+**Why**: `clearContext()` removes the context entirely; the next `getContext()` call lazily
+creates a brand-new, empty `SecurityContextImpl`, and an empty context's `authentication` property
+genuinely is `null` — Spring Security doesn't synthesize a stub "nobody's logged in" `Authentication`
+object at this level. In a real running app, `AnonymousAuthenticationFilter` (further down the
+chain) populates the context with an anonymous `Authentication` that actually reports
+`authenticated == true` — but a filter spec that drives `JwtAuthenticationFilter` directly, in
+isolation, never runs that filter, so there's nothing to produce anything but `null` when no cookie
+is present.
+
+**Fix**: assert `authentication == null` directly rather than navigating into a `.authenticated`
+property that may not exist. Don't expect the same assertion shape to work both for "cookie
+present but context cleared mid-test" (AC-20/21/22's cleanup) and "nothing ever authenticated this
+request" (AC-21/22's actual check) — they're different states.
+
+## Spock `where:` block cells are evaluated once, up front — they can't see `given:` locals or rely on `setup()` having run yet
+
+**Context**: `JwtAuthenticationFilterSpec`'s AC-22 (`@Unroll`, data-driven) built JWTs for its
+`where:` table via `jwtHelper.buildExpiredJwt(subject, ROLE_USER)`, where both `jwtHelper` and
+`subject` were plain local variables declared inside that same feature's `given:` block. Running it
+threw `groovy.lang.MissingPropertyException: No such property: jwtHelper for class:
+JwtAuthenticationFilterSpec` — Groovy fell back to looking for a class-level property and found
+none.
+
+**Why**: a `where:` block isn't just another part of the feature method body — Spock's AST
+transform has to evaluate its cell expressions *before* any iteration's `given:`/`when:`/`then:`
+runs at all, because it needs the full data table up front to know how many iterations to generate.
+At that point in the lifecycle, nothing declared inside `given:` exists yet. `where:` cells can only
+reference: previously-computed columns in the same table (left-to-right), or fields already present
+on the specification instance — and per Spock's docs, those fields have to be `@Shared` (or have a
+value from a field initializer/`setupSpec()`), because a plain instance field's `setup()`-assigned
+value likewise hasn't been set yet at `where:`-evaluation time either.
+
+**Fix**: promote anything a `where:` table needs to a `@Shared` field with its value coming from a
+field initializer, mirroring this spec's existing `@Shared JwtHelper jwtHelper = new JwtHelper()` —
+not from `setup()`.
+
+**Still-open follow-up caught in review, not yet fixed**: `JwtAuthenticationFilterSpec` also has
+`@Shared String randomUuid` whose *value* is assigned inside instance `setup()`, not a field
+initializer. That half-fixes the visibility problem (the field exists, so `where:` can see it) but
+not the timing problem — the UUID baked into the `where:`-table-built JWTs is whatever `setup()`
+last left `randomUuid` as from the *previous* feature method's run, not a value freshly generated
+for this feature. Harmless today only because AC-22 never asserts anything about the token's
+subject matching `randomUuid`; running AC-22 in isolation (no prior feature's `setup()` having
+run yet) would bake in `null` instead, meaning the "expired"/"invalid-signature" rows could end up
+silently testing the "missing subject" code path instead of the one the test name claims. Give
+`randomUuid` a `@Shared` field initializer (`UUID.randomUUID().toString()`) too, same as
+`jwtHelper`, rather than reassigning it in `setup()`.
+
+## `addFilterBefore(filter, SomeFilter.class)` doesn't require `SomeFilter` to actually exist in the chain
+
+**Context**: a test asserted `JwtAuthenticationFilter` runs before an actual
+`UsernamePasswordAuthenticationFilter` instance in the built `SecurityFilterChain`. Printing the
+real chain showed 12 filters — no `UsernamePasswordAuthenticationFilter` anywhere in it at all.
+
+**Why**: `SecurityConfig` calls `.addFilterBefore(jwtAuthenticationFilter,
+UsernamePasswordAuthenticationFilter.class)`, but that `.class` argument is only a **position
+anchor** — Spring Security maintains a fixed, known ordering of filter slots, and `addFilterBefore`
+places the given filter instance immediately ahead of wherever that class *would* sit, without
+requiring (or causing) an instance of it to exist. `UsernamePasswordAuthenticationFilter` is only
+ever actually constructed when something calls `.formLogin()` (or explicitly registers it); this
+app authenticates via a custom JSON login (`AuthController`/`AuthService`), never form login, so
+that filter genuinely never exists in any chain this app builds — there's nothing to compare
+against, ever, regardless of how the test is written.
+
+**Fix**: assert position against a filter that's actually guaranteed to be present and whose
+relative ordering genuinely matters functionally — e.g. `AuthorizationFilter`, since
+`JwtAuthenticationFilter` populating `SecurityContextHolder` before the authorization decision runs
+is the real invariant worth protecting, not literal "before the username/password filter." Revise
+the spec's AC wording to match once the test changes, so the requirement and the test stay in sync.
+
+## Filter-chain-order tests belong in a context-loading sibling spec, not the filter's own unit spec
+
+**Context**: `JwtAuthenticationFilterSpec` originally held a skeleton for "`SecurityConfig`
+registers `JwtAuthenticationFilter` ahead of X" — but that assertion is about `SecurityConfig`'s
+wiring, not `JwtAuthenticationFilter`'s own behavior, and verifying it needs a real, built
+`SecurityFilterChain` (a `List<Filter>` only a Spring context actually assembles), which has nothing
+to do with the rest of that spec's fixture (`JwtService`, `JwtHelper`, mock request/response/chain).
+
+**Why**: this project's "one spec per class under test" convention means the subject here is
+`SecurityConfig`, so the test belongs with `SecurityConfig`'s other tests — but the existing
+`SecurityConfigSpec` is a plain `new SecurityConfig()` unit spec (for its `passwordEncoder()` bean
+method), which can't produce a real `SecurityFilterChain` either. This is the same shape of problem
+`AuthServiceSpec`/`AuthServiceDataJpaSpec` already solved: same class under test, split across two
+specs by *infrastructure need* (plain POJO vs. a real Spring context) rather than one spec carrying
+mixed setup.
+
+**Fix**: add a new sibling spec rather than complicating the existing one, named after whichever
+Spring test slice it needs — `SecurityConfigSpringBootSpec` here, using `@SpringBootTest` plus
+`@ActiveProfiles("test")` and `@Autowired SecurityFilterChain securityFilterChain`, then
+`.filters.findIndexOf { it instanceof X }` to compare real positions. Keep `SecurityConfigSpec`
+itself as the plain-POJO spec for anything not requiring a built chain.
+
+## `@SpringBean` replaces a bean everywhere in the context — including inside another bean's constructor args, not just at the call sites you wrote
+
+**Context**: `AuthControllerSpec` (`@WebMvcTest(controllers = AuthController)` + `@Import(SecurityConfig)`)
+declares `@SpringBean JwtService mockJwtService = Mock()`. AC-14's test separately built a second,
+real `JwtService` instance by hand (`new JwtService(Clock.systemDefaultZone(), TEST_KEY, 15)`) just
+to mint a JWT string for the cookie. At request time, `JwtAuthenticationFilter.getClaim(...)` came
+back `null` — looked like a signing-key mismatch between the "test" key and some "real" key, but
+wasn't.
+
+**Why**: `@SpringBean` doesn't just make `mockJwtService` available for you to call directly — it
+replaces the `JwtService` bean definition for the *entire* Spring context this test boots, including
+everywhere else that bean gets injected. `SecurityConfig.securityFilterChain(..., JwtService
+jwtService)` takes `JwtService` as a constructor-style parameter and bakes whatever gets injected
+straight into `new JwtAuthenticationFilter(jwtService)` — so the filter actually running on every
+request in this test is holding the *mock*, never anything built from a real secret. The real
+`JwtService` instance created locally in `given:` is a decoy: it's only ever used to produce a
+string for the cookie, and is never wired into the filter that reads that cookie back.  Since
+`getClaim` was never stubbed, Spock's `Mock()` returned its default for an unstubbed method with an
+object return type — `null` — which was the actual symptom. A genuine key mismatch would have
+thrown `JwtParserException` instead (caught by the filter's `try/catch`), never silently returned
+`null`; that `getClaim` has no code path returning `null` on its own is itself a tell that an
+unstubbed mock, not a real parsing failure, is in play.
+
+**Consequence worth acting on, not just explaining**: once `JwtService` is mocked for a test, the
+actual *content* of any JWT string in play is irrelevant — `getClaim` never really parses it.
+Building cryptographically real malformed/expired/invalid-signature tokens via `JwtHelper` (as
+`JwtAuthenticationFilterSpec` correctly does, where `JwtService` is real) is unnecessary work one
+layer up in `AuthControllerSpec` — any opaque string works for the cookie value, and the actual
+pass/fail behavior comes entirely from how `mockJwtService.getClaim(...)` is stubbed (return a
+`JwtClaim`, or throw `JwtParserException`).
+
+## Groovy `def` inside an `if`/`else` branch doesn't leak out to the rest of the method
+
+**Context**: a `when:` block assigned `mockMvc.perform(...)`'s result inside both branches of an
+`if (cookie == null) { ... } else { ... }`, using `def result = ...` in each branch. The following
+`then:` block's `result.andExpect(...)` threw `groovy.lang.MissingPropertyException: No such
+property: result`.
+
+**Why**: `def` (or any typed declaration) inside an `if`/`else` block scopes that variable to the
+block itself — it ceases to exist once the block ends, same as Java. By the time `then:` runs,
+there's no `result` variable anywhere in the method's scope, so Groovy interprets the bare
+identifier as a property-access attempt on the spec instance, finds nothing, and throws rather than
+silently returning `null`.
+
+**Fix**: declare the variable once above the conditional (`def result`), then assign (without `def`)
+inside each branch, so the same variable reference is still in scope when `then:` reads it.
+
+## Spock only auto-invokes a mock-response closure written literally at the `>>` call site — not one stored in a variable
+
+**Context**: a data-driven test tried to vary a stub's *response* per `where:` row by putting
+closures directly in the table — `mockJwtService.getClaim(_ as String) >> getClaimResult`, where
+`getClaimResult` came from a `where:` column holding values like `{ new JwtClaim(...) }` and
+`{ throw new JwtParserException("bad token") }`. Rows that needed the "throw" closure to actually
+fire failed with `GroovyCastException: Cannot cast object '...closure4@...' ... to class
+'JwtClaim'`, thrown from Spock's own `ConstantResponseGenerator.doRespond`.
+
+**Why**: Spock's "this closure is a response generator — call it per invocation, instead of
+returning it as a value" behavior is detected by its compile-time AST transform recognizing a
+closure written *literally* immediately after `>>` at the interaction declaration. Once the closure
+is held in a variable instead — even one bound from a `where:` table — that syntactic pattern is
+gone by the time the transform runs, so Spock falls back to `ConstantResponseGenerator`: it treats
+the variable's value as a plain constant to hand back as-is. Since `JwtService.getClaim`'s declared
+return type is `JwtClaim`, it then tries to coerce that raw `Closure` object into a `JwtClaim` and
+fails. (The row that didn't need the throw to fire — "no cookie" — never triggered this at all,
+because `JwtAuthenticationFilter` short-circuits on a null `Cookie[]` and never calls `getClaim` in
+that branch in the first place; that row only got as far as the separate `def`-scoping bug above.)
+
+**Fix**: write the closure literally at the stub call site, pulling only a plain (non-closure) value
+out of the `where:` table for it to reference:
+```groovy
+given:
+if (cookie != null) {
+    mockJwtService.getClaim(_ as String) >> { throw new JwtParserException(exceptionMessage) }
+}
+
+where:
+scenario           | cookie       | exceptionMessage
+"malformed cookie" | "bad cookie" | "bad token"
+```
+Also worth dropping a `where:` row entirely rather than stubbing a response for it, if the code path
+being tested never actually reaches the mocked call on that row (as above, with "no cookie").
+
+## Test-only constants added to a main-source-set `Constants` class ship in the production JAR with zero production usages
+
+**Context**: `Constants.java` (`backend/src/main`) picked up `ROLE_USER`, `ROLE_ADMIN`, and
+`TEST_KEY` — all added purely so Spock specs had somewhere to import a shared role string / signing
+key from. A pre-commit review grepped `backend/src/main` for any of the three and found none —
+every reference was from `src/test`.
+
+**Why this matters, not just "slightly untidy"**: a main-source `Constants` class is part of what
+ships in the production JAR. Test-only values living there have no compiler-enforced link to
+anything real (there's already a genuine `Role` enum, `model/Role.java`, with `USER`/`ADMIN` —
+`ROLE_USER`/`ROLE_ADMIN` as plain strings duplicate it without that enum ever being able to catch a
+drift between the two), and `TEST_KEY` being physically reachable from production code, even though
+nothing calls it, is the kind of thing a future secret-scanning or security-review pass flags for no
+reason.
+
+**Fix**: a dedicated test-source-set class — `TestConstants` under
+`backend/src/test/groovy/.../common/` — for anything that exists purely to give specs a shared
+literal to import. **General tell during review**: when a "constants" file picks up a new value
+mid-feature, grep the main source set for actual usages before assuming it belongs there; "used
+throughout testing" written as a comment on a main-source constant is itself a signal it's in the
+wrong source set.
+
+## Reusing an AC label for a new test doesn't make it test that AC — check what the label already means first
+
+**Context**: six tests across three specs (`JwtServiceSpec`, `AuthServiceSpec`,
+`AuthServiceDataJpaSpec`) were labeled `AUTH-001-AC-14` while being hand-coded alongside the actual
+AC-14 work. A pre-commit review caught that `AUTH-001-AC-14` already has one specific, established
+meaning in `backend_spec_001_basic_login.md` — "`GET /api/auth/me` with a valid cookie returns `200`
+with the user body" — which `AuthControllerSpec` already covers correctly. The six mislabeled tests
+were testing something else entirely: `JwtService.getClaim`'s own parsing contract, and
+`AuthService.getUserDetailsById`'s found/not-found behavior — real, worthwhile collaborator-level
+tests that just didn't have their own AC to point to yet.
+
+**Why**: it's natural, while implementing one AC, to lean on its number for every test written in
+service of it — but an AC label is supposed to be a 1:1 pointer to one specific, already-written
+requirement statement, not a loose "this is part of the same effort" tag. Once reused loosely, the
+AC's own meaning gets muddied for anyone using the label to find out what's actually guaranteed, and
+the collaborator-level behavior being tested has no requirement of its own on record at all.
+
+**Fix**: when a new test's behavior doesn't match an existing AC's statement word-for-word, don't
+borrow that AC's number — write a new AC for it instead (this spec already has a precedent for ACs
+discovered mid-implementation: Requirement 6 for email normalization, Requirement 7 for the JWT
+filter, and now Requirement 8 for these two collaborator contracts, `AUTH-001-AC-24`/`AC-25`).
+**General tell during review**: grep the spec for every AC label a new/changed test file uses, and
+confirm each one's text still actually describes what that specific test asserts — not just that
+the number existed and was topically nearby.

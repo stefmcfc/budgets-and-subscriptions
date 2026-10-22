@@ -1,21 +1,29 @@
 package uk.co.stefirby.budgetsandsubscriptions.controller
 
+import jakarta.servlet.http.Cookie
 import org.spockframework.spring.SpringBean
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
 import org.springframework.context.annotation.Import
+import org.springframework.http.ResponseCookie
 import org.springframework.test.web.servlet.MockMvc
+import spock.lang.Shared
 import spock.lang.Specification
 import spock.lang.Unroll
 import tools.jackson.databind.ObjectMapper
+import uk.co.stefirby.budgetsandsubscriptions.dto.JwtClaim
 import uk.co.stefirby.budgetsandsubscriptions.dto.LoginRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.RegisterRequest
-import uk.co.stefirby.budgetsandsubscriptions.dto.RegisterResponse
+import uk.co.stefirby.budgetsandsubscriptions.dto.UserResponse
 import uk.co.stefirby.budgetsandsubscriptions.exception.DuplicateEmailException
+import uk.co.stefirby.budgetsandsubscriptions.exception.JwtParserException
 import uk.co.stefirby.budgetsandsubscriptions.exception.LoginException
-import uk.co.stefirby.budgetsandsubscriptions.security.JwtBuilder
+import uk.co.stefirby.budgetsandsubscriptions.security.JwtService
 import uk.co.stefirby.budgetsandsubscriptions.security.SecurityConfig
+import uk.co.stefirby.budgetsandsubscriptions.security.util.JwtHelper
 import uk.co.stefirby.budgetsandsubscriptions.service.AuthService
+
+import java.time.Duration
 
 import static org.hamcrest.Matchers.aMapWithSize
 import static org.hamcrest.Matchers.allOf
@@ -23,8 +31,11 @@ import static org.hamcrest.Matchers.containsString
 import static org.hamcrest.Matchers.hasItem
 import static org.hamcrest.Matchers.hasSize
 import static org.hamcrest.Matchers.not
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
+import static uk.co.stefirby.budgetsandsubscriptions.common.Constants.COOKIE_ACCESS_TOKEN
+import static uk.co.stefirby.budgetsandsubscriptions.common.TestConstants.ROLE_USER
 
 @WebMvcTest(controllers = AuthController)
 @Import(SecurityConfig)
@@ -32,14 +43,13 @@ class AuthControllerSpec extends Specification {
 
     private static final String ENDPOINT_LOGIN = "/api/auth/login"
     private static final String ENDPOINT_REGISTER = "/api/auth/register"
+    private static final String ENDPOINT_GET_CURRENT_USER = "/api/auth/me"
 
     private static final String NEW_EMAIL_ADDRESS = "new.user@test.com"
     private static final String VALID_PASSWORD = "validPassword"
     private static final String DISPLAY_NAME = "Display Name"
-    private static final String ACCESS_TOKEN = "access_token"
     private static final String MOCK_JWT = "mock.jwt"
     private static final String DUMMY_MESSAGE = "dummy message"
-    private static final String ROLE_USER = "USER"
 
     @Autowired
     MockMvc mockMvc
@@ -51,23 +61,41 @@ class AuthControllerSpec extends Specification {
     AuthService mockAuthService = Mock()
 
     @SpringBean
-    JwtBuilder mockJwtBuilder = Mock()
+    JwtService mockJwtService = Mock()
+
+    @Shared
+    JwtHelper jwtHelper = new JwtHelper()
 
     private void setupMockForSuccessfulRegistration(RegisterRequest registerRequest, UUID uuid) {
-        def validResponse = new RegisterResponse(uuid, registerRequest.email(), registerRequest.displayName(), ROLE_USER)
+        def validResponse = new UserResponse(uuid, registerRequest.email(), registerRequest.displayName(), ROLE_USER)
         mockAuthService.register(registerRequest) >> validResponse
-        mockJwtBuilder.createJWT(uuid.toString(), ROLE_USER) >> MOCK_JWT
+        mockJwtService.createJWT(uuid.toString(), ROLE_USER) >> MOCK_JWT
     }
 
     private void setupMockForSuccessfulLogin(LoginRequest loginRequest, UUID uuid) {
-        def validResponse = new RegisterResponse(uuid, loginRequest.email(), DISPLAY_NAME, ROLE_USER)
+        def validResponse = new UserResponse(uuid, loginRequest.email(), DISPLAY_NAME, ROLE_USER)
         mockAuthService.login(loginRequest) >> validResponse
-        mockJwtBuilder.createJWT(uuid.toString(), ROLE_USER) >> MOCK_JWT
+        mockJwtService.createJWT(uuid.toString(), ROLE_USER) >> MOCK_JWT
     }
 
     private static UUID getRandomUuid() {
         return UUID.randomUUID()
     }
+
+    private ResponseCookie createResponseCookie( String cookieValue) {
+        return ResponseCookie
+                .from(COOKIE_ACCESS_TOKEN, cookieValue)
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Strict")
+                .path("/")
+                .maxAge(Duration.ofMinutes(15))
+                .build();
+    }
+
+    //---------------------------------
+    // /api/auth/registration tests
+    //=================================
 
     def "AUTH-001-AC-05: registers a new user with a valid request and logs them in"() {
         given: "a valid registration request (unused email, 12+ char password, non-blank displayName)"
@@ -84,17 +112,17 @@ class AuthControllerSpec extends Specification {
         then: "the response is 201 Created with the new user's id, email, displayName, and role"
         result.andExpect(status().isCreated())
         String responseJson = result.andReturn().getResponse().getContentAsString()
-        RegisterResponse response = objectMapper.readValue(responseJson, RegisterResponse)
-        response.id == uuid
-        response.email == NEW_EMAIL_ADDRESS
-        response.displayName == DISPLAY_NAME
-        response.role == ROLE_USER
+        UserResponse response = objectMapper.readValue(responseJson, UserResponse)
+        response.id() == uuid
+        response.email() == NEW_EMAIL_ADDRESS
+        response.displayName() == DISPLAY_NAME
+        response.role() == ROLE_USER
 
         and: "the response sets an httpOnly, Secure, SameSite=Strict access-token cookie expiring in 15 minutes"
-        result.andExpect(cookie().httpOnly(ACCESS_TOKEN, true))
-        result.andExpect(cookie().secure(ACCESS_TOKEN, true))
-        result.andExpect(cookie().maxAge(ACCESS_TOKEN, 15 * 60))
-        result.andExpect(cookie().sameSite(ACCESS_TOKEN, "Strict"))
+        result.andExpect(cookie().httpOnly(COOKIE_ACCESS_TOKEN, true))
+        result.andExpect(cookie().secure(COOKIE_ACCESS_TOKEN, true))
+        result.andExpect(cookie().maxAge(COOKIE_ACCESS_TOKEN, 15 * 60))
+        result.andExpect(cookie().sameSite(COOKIE_ACCESS_TOKEN, "Strict"))
 
         and: "(AUTH-001-AC-09) the response body contains neither a password field, a password-hash field, nor the raw JWT string"
         result.andExpect(jsonPath('$.password').doesNotExist())
@@ -220,6 +248,10 @@ class AuthControllerSpec extends Specification {
 
     }
 
+    //---------------------------------
+    // /api/auth/login tests
+    //=================================
+
     def "AUTH-001-AC-10: successful login issues an access-token cookie"() {
         given: "an existing user with a known email and password"
         def newLoginRequest = new LoginRequest(NEW_EMAIL_ADDRESS, VALID_PASSWORD)
@@ -235,17 +267,17 @@ class AuthControllerSpec extends Specification {
         then: "the response is 200 OK with the user's id, email, displayName, and role"
         result.andExpect(status().isOk())
         String responseJson = result.andReturn().getResponse().getContentAsString()
-        RegisterResponse response = objectMapper.readValue(responseJson, RegisterResponse)
-        response.id == uuid
-        response.email == NEW_EMAIL_ADDRESS
-        response.displayName == DISPLAY_NAME
-        response.role == ROLE_USER
+        UserResponse response = objectMapper.readValue(responseJson, UserResponse)
+        response.id() == uuid
+        response.email() == NEW_EMAIL_ADDRESS
+        response.displayName() == DISPLAY_NAME
+        response.role() == ROLE_USER
 
         and: "the response sets an httpOnly, Secure, SameSite=Strict access-token cookie expiring in 15 minutes"
-        result.andExpect(cookie().httpOnly(ACCESS_TOKEN, true))
-        result.andExpect(cookie().secure(ACCESS_TOKEN, true))
-        result.andExpect(cookie().maxAge(ACCESS_TOKEN, 15 * 60))
-        result.andExpect(cookie().sameSite(ACCESS_TOKEN, "Strict"))
+        result.andExpect(cookie().httpOnly(COOKIE_ACCESS_TOKEN, true))
+        result.andExpect(cookie().secure(COOKIE_ACCESS_TOKEN, true))
+        result.andExpect(cookie().maxAge(COOKIE_ACCESS_TOKEN, 15 * 60))
+        result.andExpect(cookie().sameSite(COOKIE_ACCESS_TOKEN, "Strict"))
     }
 
     def "AUTH-001-AC-11: rejects login with a non-existent email or a wrong password"() {
@@ -263,7 +295,7 @@ class AuthControllerSpec extends Specification {
         result.andExpect(status().isUnauthorized())
 
         and: "no access-token cookie is set"
-        result.andExpect(cookie().doesNotExist(ACCESS_TOKEN))
+        result.andExpect(cookie().doesNotExist(COOKIE_ACCESS_TOKEN))
 
         where:
         scenario                | email                    | password
@@ -328,20 +360,56 @@ class AuthControllerSpec extends Specification {
         "empty email and password" | ""                | ""               | 2          | "password"
     }
 
+    //---------------------------------
+    // /api/auth/me tests
+    //=================================
+
     def "AUTH-001-AC-14: returns the current user for a valid session"() {
         given: "a valid, unexpired access-token cookie for an existing user"
+        UUID uuid = getRandomUuid()
+        UserResponse validResponse = new UserResponse(uuid, NEW_EMAIL_ADDRESS, DISPLAY_NAME, ROLE_USER)
+        mockAuthService.getUserDetailsById(uuid.toString()) >> validResponse
+
+        String jwt = jwtHelper.buildJwt(uuid.toString(), ROLE_USER)
+        mockJwtService.getClaim(jwt) >> new JwtClaim(uuid.toString(), ROLE_USER)
 
         when: "GET /api/auth/me is requested with that cookie"
+        def result = mockMvc.perform(get(ENDPOINT_GET_CURRENT_USER)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, jwt)))
 
         then: "the response is 200 OK with the user's id, email, displayName, and role"
+        result.andExpect(status().isOk())
+        String responseJson = result.andReturn().getResponse().getContentAsString()
+        UserResponse response = objectMapper.readValue(responseJson, UserResponse)
+        response.id() == uuid
+        response.email() == NEW_EMAIL_ADDRESS
+        response.displayName() == DISPLAY_NAME
+        response.role() == ROLE_USER
     }
 
     def "AUTH-001-AC-15: rejects a missing, invalid, or expired session"() {
         given: "a request with either no cookie, a malformed cookie, or an expired/invalid-signature token"
+        if (cookie != null) {
+            mockJwtService.getClaim(_ as String) >> { throw new JwtParserException(exceptionMessage) }
+        }
 
         when: "GET /api/auth/me is requested"
+        def result
+        if (cookie == null) {
+            result = mockMvc.perform(get(ENDPOINT_GET_CURRENT_USER))
+        } else {
+            result = mockMvc.perform(get(ENDPOINT_GET_CURRENT_USER)
+                    .cookie(new Cookie(COOKIE_ACCESS_TOKEN, cookie)))
+        }
 
         then: "the response is 401 Unauthorized"
+        result.andExpect(status().isUnauthorized())
+
+        where:
+        scenario           | cookie           | exceptionMessage
+        "no cookie"        | null             | "no cookie"
+        "malformed cookie" | "bad cookie"     | "bad token"
+        "expired cookie"   | "expired cookie" | "expired token"
     }
 
     def "AUTH-001-AC-16: logout clears the access-token cookie"() {

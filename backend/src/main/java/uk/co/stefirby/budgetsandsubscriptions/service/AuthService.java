@@ -8,13 +8,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import uk.co.stefirby.budgetsandsubscriptions.dto.LoginRequest;
 import uk.co.stefirby.budgetsandsubscriptions.dto.RegisterRequest;
-import uk.co.stefirby.budgetsandsubscriptions.dto.RegisterResponse;
+import uk.co.stefirby.budgetsandsubscriptions.dto.UserResponse;
 import uk.co.stefirby.budgetsandsubscriptions.exception.DuplicateEmailException;
 import uk.co.stefirby.budgetsandsubscriptions.exception.LoginException;
+import uk.co.stefirby.budgetsandsubscriptions.exception.UserException;
 import uk.co.stefirby.budgetsandsubscriptions.model.User;
 import uk.co.stefirby.budgetsandsubscriptions.repository.UserRepository;
 
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 public class AuthService {
@@ -22,6 +24,7 @@ public class AuthService {
     private static final String DUMMY_HASH = "$2a$10$lpv0VpOQoLXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXDummyPassword";
     protected static final String MESSAGE_DUPLICATE_EMAIL = "A user already exists with this email address";
     protected static final String MESSAGE_LOGIN_ERROR = "Unable to login";
+    protected static final String MESSAGE_USER_ERROR = "User not found";
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -32,7 +35,7 @@ public class AuthService {
     }
 
     @Transactional
-    public RegisterResponse register(RegisterRequest request) {
+    public UserResponse register(RegisterRequest request) {
         // at this point validation of fields has already happened behind the scenes.
 
         // first check to see if user (email address) already exists.
@@ -56,13 +59,13 @@ public class AuthService {
         }
 
         // fetch the details from the db
-        return new RegisterResponse(savedUser.getId(), savedUser.getEmail(),
+        return new UserResponse(savedUser.getId(), savedUser.getEmail(),
                 savedUser.getDisplayName(), savedUser.getRole().toString());
 
     }
 
     @Transactional
-    public RegisterResponse login(LoginRequest request) {
+    public UserResponse login(LoginRequest request) {
         String email = request.email().toLowerCase();
         Optional<User> userCheck = userRepository.findByEmail(email);
         if (userCheck.isEmpty()) {
@@ -82,7 +85,22 @@ public class AuthService {
             throw new LoginException(MESSAGE_LOGIN_ERROR);
         }
 
-        return new RegisterResponse(user.getId(), user.getEmail(),
+        return new UserResponse(user.getId(), user.getEmail(),
+                user.getDisplayName(), user.getRole().toString());
+    }
+
+    @Transactional
+    public UserResponse getUserDetailsById(String userId) {
+        Optional<User> userCheck = userRepository.findById(UUID.fromString(userId));
+
+        if (userCheck.isEmpty()) {
+            LOG.warn("{} (user not found in DB)", MESSAGE_USER_ERROR);
+            throw new UserException(MESSAGE_USER_ERROR);
+        }
+
+        User user = userCheck.get();
+
+        return new UserResponse(user.getId(), user.getEmail(),
                 user.getDisplayName(), user.getRole().toString());
     }
 }

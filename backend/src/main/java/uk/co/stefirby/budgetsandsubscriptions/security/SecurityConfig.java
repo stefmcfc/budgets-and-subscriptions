@@ -10,6 +10,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 import tools.jackson.databind.ObjectMapper;
 
@@ -38,9 +39,14 @@ public class SecurityConfig {
     // are the practical defence for this single-user, not-yet-public app.
     @SuppressWarnings("java:S4502")
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, CorsConfigurationSource corsConfigurationSource,
-                                                   ObjectMapper objectMapper) {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http,
+                                                   CorsConfigurationSource corsConfigurationSource,
+                                                   ObjectMapper objectMapper,
+                                                   JwtService jwtService) {
+        JwtAuthenticationFilter jwtAuthenticationFilter = new JwtAuthenticationFilter(jwtService);
+
         http
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
             .cors(cors -> cors.configurationSource(corsConfigurationSource))
             .csrf(AbstractHttpConfigurer::disable)
             .authorizeHttpRequests(authorize -> authorize

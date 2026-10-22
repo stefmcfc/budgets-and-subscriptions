@@ -42,6 +42,12 @@ public class GlobalExceptionHandler {
                 .body(ApiError.of(ex.getMessage()));
     }
 
+    @ExceptionHandler(UserException.class)
+    public ResponseEntity<ApiError> handleUserException(UserException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ApiError.of(ex.getMessage()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleException(Exception ex) {
         LOG.error("Unhandled Exception", ex);

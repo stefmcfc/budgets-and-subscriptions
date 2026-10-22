@@ -10,9 +10,10 @@ import spock.lang.Specification
 import spock.lang.Subject
 import uk.co.stefirby.budgetsandsubscriptions.dto.LoginRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.RegisterRequest
-import uk.co.stefirby.budgetsandsubscriptions.dto.RegisterResponse
+import uk.co.stefirby.budgetsandsubscriptions.dto.UserResponse
 import uk.co.stefirby.budgetsandsubscriptions.exception.DuplicateEmailException
 import uk.co.stefirby.budgetsandsubscriptions.exception.LoginException
+import uk.co.stefirby.budgetsandsubscriptions.exception.UserException
 import uk.co.stefirby.budgetsandsubscriptions.model.User
 import uk.co.stefirby.budgetsandsubscriptions.repository.UserRepository
 
@@ -89,7 +90,7 @@ class AuthServiceDataJpaSpec extends Specification {
 
         when: "AUTH-001-AC-18: login is called with upper case email"
         LoginRequest loginRequest = new LoginRequest(UPPERCASE_EMAIL, DUMMY_PASSWORD)
-        RegisterResponse result = authService.login(loginRequest)
+        UserResponse result = authService.login(loginRequest)
 
         then: "response brings back real values from DB"
         userRepository.findByEmail(LOWERCASE_EMAIL).isPresent()
@@ -120,5 +121,38 @@ class AuthServiceDataJpaSpec extends Specification {
 
         then: "LoginException is thrown"
         thrown(LoginException)
+    }
+
+    //-----------------------
+    //  Get User Details By Id tests
+    //=======================
+
+    def "AUTH-001-AC-25: given user exists then details are returned"() {
+        given: "user is registered"
+        User newUser = new User(LOWERCASE_EMAIL, DUMMY_PASSWORD, DISPLAY_NAME)
+        User savedUser = userRepository.saveAndFlush(newUser)
+
+        and: "we know the userID"
+        UUID uuid = savedUser.getId()
+
+        when: "we call getUserDetailsById"
+        UserResponse userResponse = authService.getUserDetailsById(uuid.toString())
+
+        then: "the details returned match the original saved user"
+        userResponse.id() == uuid
+        userResponse.email() == savedUser.getEmail()
+        userResponse.role() == savedUser.getRole().toString()
+        userResponse.displayName() == savedUser.getDisplayName()
+    }
+
+    def "AUTH-001-AC-25: given user does not exist then exception is thrown"() {
+        given: "random uuid and empty db"
+        UUID uuid = UUID.randomUUID()
+
+        when: "we try to get user by id"
+        authService.getUserDetailsById(uuid.toString())
+
+        then: "UserException is thrown"
+        thrown(UserException)
     }
 }

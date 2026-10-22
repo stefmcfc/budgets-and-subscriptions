@@ -34,8 +34,8 @@ such that persisting a second user whose email differs from an existing one only
 is the sole login identifier; `Foo@x.com` and `foo@x.com` must collide.
 
 **Addendum (found during AUTH-001-AC-10/AC-11 code review)**: this constraint alone doesn't make
-*lookups* case-insensitive — see `AUTH-001-AC-18`, which normalizes email at the `AuthService`
-boundary so registration and login both honor this guarantee directly, rather than relying solely
+*lookups* case-insensitive — see `AUTH-001-AC-18`, which normalises email at the `AuthService`
+boundary so registration and login both honour this guarantee directly, rather than relying solely
 on the DB-level functional index below.
 
 #### AUTH-001-AC-02 [AUTO]: Role defaults to USER
@@ -89,7 +89,7 @@ not create a user.
 
 **Rationale**: Enforces AUTH-001-AC-01's uniqueness constraint at the API layer with a meaningful
 status code rather than surfacing a raw constraint-violation error. With `AUTH-001-AC-18`'s
-normalization in place, a same-or-different-case duplicate is caught directly by the up-front
+normalisation in place, a same-or-different-case duplicate is caught directly by the up-front
 lookup; the DB's functional unique index (and the `DataIntegrityViolationException` fallback that
 catches it) remains purely as a safety net against a race between two concurrent registrations for
 the same email.
@@ -165,7 +165,7 @@ exists only to give the frontend the user's displayable identity.
 access-token cookie.
 
 **Rationale**: Added during `AUTH-001-AC-11` code review — `LoginRequest`'s `@NotBlank`
-constraints already produce this behavior incidentally via `GlobalExceptionHandler`, but it had
+constraints already produce this behaviour incidentally via `GlobalExceptionHandler`, but it had
 never been a deliberate, documented, or tested decision. Decided to keep it as a `400`, matching
 the same malformed-input treatment `AUTH-001-AC-08` already gives registration: a blank/missing
 field carries no information about whether any account exists (it fails identically either way),
@@ -185,6 +185,13 @@ user identified by that token.
 **Rationale**: `design-decisions.md`'s "Display name" section — this endpoint exists specifically
 because the frontend can never read an httpOnly cookie's contents itself.
 
+**Addendum (added alongside AUTH-001-AC-20/AC-23)**: this AC's externally-observable behaviour
+(`200` with the user body) is unchanged, but the mechanism behind it is not — `AuthController.
+getCurrentUser` no longer performs its own `@CookieValue` extraction and `JwtService.getUserId`
+call. `JwtAuthenticationFilter` (`AUTH-001-AC-20`) now populates `SecurityContextHolder` upstream,
+before the controller method ever runs, and the controller simply reads the already-authenticated
+principal from there.
+
 #### AUTH-001-AC-15 [AUTO]: Missing or invalid session is rejected
 **Statement**: If `GET /api/auth/me` is requested with a missing, malformed, expired, or
 signature-invalid access-token cookie, then the `AuthController` shall respond
@@ -192,6 +199,12 @@ signature-invalid access-token cookie, then the `AuthController` shall respond
 
 **Rationale**: Covers every way the cookie can fail to represent a currently-valid session, given
 there's no refresh mechanism yet in this spec to fall back on.
+
+**Addendum (added alongside AUTH-001-AC-21/AC-22)**: likewise, this `401` no longer comes from a
+manual null-check inside `AuthController`. A missing, malformed, expired, or invalid-signature
+cookie now simply leaves `SecurityContextHolder` unauthenticated (`AUTH-001-AC-21`/`AUTH-001-AC-22`),
+and the `.authenticated()` rule plus `JsonAuthenticationEntryPoint` already configured in
+`SecurityConfig` produce this `401` before `AuthController` is ever invoked.
 
 ### Requirement 5: Logout
 
@@ -216,11 +229,11 @@ client immediately after a `POST /api/auth/logout` response, the `AuthController
 effect — the one thing worth checking end-to-end given logout has no server-side state in this
 spec.
 
-### Requirement 6: Email normalization (cross-cutting)
+### Requirement 6: Email normalisation (cross-cutting)
 
 **User story**: As the system, I need every code path that reads or writes `email` to treat case
 variants as the same identity, so that AUTH-001-AC-01's case-insensitive uniqueness guarantee is
-actually honored end-to-end, not just at the database constraint.
+actually honoured end-to-end, not just at the database constraint.
 
 **Added**: this requirement wasn't part of the original spec — it was added after
 AUTH-001-AC-10/AC-11 code review surfaced that `UserRepository.findByEmail` is a case-sensitive
@@ -229,31 +242,128 @@ case-insensitivity is enforced only by a separate functional unique index (`lowe
 this fix, a user registered as `Foo@x.com` who later logs in as `foo@x.com` would incorrectly get
 AUTH-001-AC-11's "no such user" rejection.
 
-#### AUTH-001-AC-18 [AUTO]: Email normalized to lowercase before any persistence or lookup
+#### AUTH-001-AC-18 [AUTO]: Email normalised to lowercase before any persistence or lookup
 **Statement**: Before performing any persistence or lookup operation keyed on `email`, the
 `AuthService` shall normalize the submitted email to lowercase.
 
-**Rationale**: Normalizing once at the `AuthService` boundary — rather than teaching every
+**Rationale**: Normalising once at the `AuthService` boundary — rather than teaching every
 repository query to be case-insensitive — makes every `findByEmail` call (both registration's
 duplicate check and login's user lookup) a plain equality comparison that's correct by
 construction. The database's functional unique index on `lower(email)` is retained, but demoted
 from the primary case-insensitivity mechanism to a race-condition safety net (per AUTH-001-AC-06's
 updated rationale above).
 
+### Requirement 7: JWT authentication filter
+
+**User story**: As the system, I need Spring Security's own authentication mechanism actually
+populated from the access-token cookie — not bypassed by ad hoc controller-side parsing — so that
+`authenticated()`-gated routes like `GET /api/auth/me` are reachable in the first place, and so
+every future protected endpoint gets the same guarantee for free.
+
+**Added**: this requirement wasn't part of the original spec — it surfaced while hand-coding
+AUTH-001-AC-14/AC-15. `SecurityConfig` already gates every `/api/**` request behind
+`.authenticated()`, except the two `permitAll` login/register POSTs, but nothing ever populated
+`SecurityContextHolder` — `AuthController.getCurrentUser` did its own manual `@CookieValue`
+extraction and called `JwtService.getUserId` directly, entirely bypassing Spring Security's
+authentication mechanism. The practical symptom: every request to `/api/auth/me` was rejected
+`401` by the security filter chain (via the existing `JsonAuthenticationEntryPoint`) before the
+controller was ever invoked.
+
+#### AUTH-001-AC-20 [AUTO]: Valid cookie populates the SecurityContext
+**Statement**: When a request carries a valid, unexpired, correctly-signed `access_token` cookie,
+the `JwtAuthenticationFilter` shall populate `SecurityContextHolder` with an authenticated
+`Authentication` built from that token's user id and role, before the filter chain's authorisation
+check runs.
+
+**Rationale**: This is the mechanism that actually makes `AUTH-001-AC-14` possible —
+`SecurityConfig`'s `.authenticated()` rule has nothing to authorise against otherwise. Extraction
+goes through the existing `JwtService` (`AUTH-001-AC-10`'s issuance counterpart), so token
+parsing/validation logic isn't duplicated between issuance and verification.
+
+#### AUTH-001-AC-21 [AUTO]: Missing cookie leaves the request unauthenticated
+**Statement**: When a request carries no `access_token` cookie, the `JwtAuthenticationFilter`
+shall continue the filter chain without setting an `Authentication` in `SecurityContextHolder`.
+
+**Rationale**: The two `permitAll` routes (`POST /api/auth/login`, `POST /api/auth/register`) must
+keep working with no cookie present at all — a cookie-less request is the normal case for those
+two, not a failure the filter itself should reject. Whether the resulting lack of authentication
+then matters is left entirely to `SecurityConfig`'s existing per-route rules downstream.
+
+#### AUTH-001-AC-22 [AUTO]: Malformed, expired, or invalid-signature cookie doesn't propagate as a server error
+**Statement**: If a request's `access_token` cookie is malformed, expired, or has an invalid
+signature — i.e. `JwtService` throws `JwtParserException` while the `JwtAuthenticationFilter`
+attempts to read it — then the `JwtAuthenticationFilter` shall catch that exception, leave
+`SecurityContextHolder` unauthenticated, and continue the filter chain.
+
+**Rationale**: Without this, a bad cookie would surface as an unhandled `500` from inside the
+filter chain, before `GlobalExceptionHandler` (which only wraps controller-layer exceptions) ever
+gets a chance to see it. Leaving the context unauthenticated instead lets `SecurityConfig`'s
+existing `.authenticated()` rule and `JsonAuthenticationEntryPoint` produce the already-specified
+`401` (`AUTH-001-AC-15`), rather than inventing a second, filter-level error path.
+
+#### AUTH-001-AC-23 [AUTO]: Filter is registered in the security filter chain
+**Statement**: The `SecurityConfig` filter chain shall register `JwtAuthenticationFilter` to run
+before `AuthorizationFilter`.
+
+**Rationale**: The filter must run early enough that its `SecurityContextHolder` population is in
+place before Spring Security's own authorisation decision (`.authenticated()`) runs — `AuthorizationFilter`
+is what actually makes that decision, so that's the real ordering constraint. (`UsernamePasswordAuthenticationFilter`
+isn't a usable reference point here: it's only ever constructed when something calls `.formLogin()`,
+which this app never does — it authenticates via a custom JSON login, not Spring Security's
+form-login mechanism — so that filter never exists in this app's chain to be "before" at all.)
+
+### Requirement 8: Supporting collaborators for session rehydration
+
+**User story**: As the system, I need `JwtService.getClaim` and `AuthService.getUserDetailsById` —
+the two collaborators `AuthController.getCurrentUser` and `JwtAuthenticationFilter` depend on — to
+have their own directly-tested contracts, so that `AUTH-001-AC-14`/`AUTH-001-AC-15`'s externally
+observable `200`/`401` behaviour is backed by verified unit-level behaviour at each collaborator,
+not just the end-to-end controller test.
+
+**Added**: this requirement wasn't part of the original spec — a pre-commit review of the
+AUTH-001-AC-14/AC-15 implementation found six existing, already-passing tests (two each in
+`JwtServiceSpec`, `AuthServiceSpec`, `AuthServiceDataJpaSpec`) mislabeled `AUTH-001-AC-14`, even
+though that AC is specifically about `GET /api/auth/me`'s controller-level response and is already
+correctly covered by `AuthControllerSpec`. The tests themselves were sound and worth keeping — they
+needed their own ACs to point to, not AC-14's.
+
+#### AUTH-001-AC-24 [AUTO]: `JwtService.getClaim` validates the subject and role claims
+**Statement**: When `JwtService.getClaim` is given a JWT whose `sub` claim is a valid UUID and whose
+`role` claim is non-blank, it shall return a `JwtClaim` with that subject and role; if either claim
+is missing, blank, or the subject is not a valid UUID, it shall throw `JwtParserException`.
+
+**Rationale**: This is the contract `JwtAuthenticationFilter` depends on for `AUTH-001-AC-20`
+(successful population) and `AUTH-001-AC-22` (catching `JwtParserException` for anything else) —
+pinning it down directly means a future change to claim validation gets caught here, not only
+indirectly through the filter's own tests.
+
+#### AUTH-001-AC-25 [AUTO]: `AuthService.getUserDetailsById` returns the user or fails closed
+**Statement**: When `AuthService.getUserDetailsById` is given the id of an existing user, it shall
+return a `UserResponse` for that user; if given an id matching no user, it shall throw
+`UserException`, which `GlobalExceptionHandler` maps to `401 Unauthorized`.
+
+**Rationale**: This is the lookup `AuthController.getCurrentUser` performs once
+`JwtAuthenticationFilter` has already authenticated the request (`AUTH-001-AC-14`) — the "no such
+user" branch covers the edge case of a still-valid token for a user who no longer exists (e.g.
+deleted between token issuance and use), which `AUTH-001-AC-14`/`AUTH-001-AC-15`'s black-box
+controller tests don't exercise directly.
+
 ## Cross-references
 
-| Contract | Defined here | Used by |
-|---|---|---|
-| `User` entity (`email`, password hash, `displayName`, `role`) | This spec | `backend_spec_002_refresh_tokens` (future, stage 2), `backend_spec_003_admin_account_management` (future, stage 3), `frontend_spec_001_basic_login.md` |
-| `POST /api/auth/register` | This spec | `frontend_spec_001_basic_login.md` |
-| `POST /api/auth/login` | This spec | `frontend_spec_001_basic_login.md` |
-| `GET /api/auth/me` | This spec | `frontend_spec_001_basic_login.md` — session rehydration on app load |
-| `POST /api/auth/logout` | This spec | `frontend_spec_001_basic_login.md` |
-| Access-token JWT shape (`sub` = user id, `role` claim, HS256, 15 min) | `.claude/01-authentication/design-decisions.md` ("Access token") | This spec (issuance/validation); `backend_spec_002_refresh_tokens` (future reissue-on-refresh) |
-| Password policy (BCrypt, min length 12, no complexity rule) | `.claude/01-authentication/design-decisions.md` ("Password hashing", "Registration / login identifier") | This spec |
-| Role column, `USER`/`ADMIN` enum | `.claude/01-authentication/design-decisions.md` ("Access token", "Admin bootstrap") | This spec (column only); `backend_spec_003_admin_account_management` (future — first spec to act on the distinction) |
-| Email verification (explicitly not built) | `.claude/01-authentication/spec_candidates.md` | N/A — confirms no verification columns/endpoints belong in this spec |
-| Email normalization (lowercase at the `AuthService` boundary) | This spec (`AUTH-001-AC-18`) | `AUTH-001-AC-01` (uniqueness), `AUTH-001-AC-06` (duplicate check), `AUTH-001-AC-10`/`AUTH-001-AC-11` (login lookup) — all within this spec |
+| Contract                                                                                                                   | Defined here                                                                                            | Used by                                                                                                                                                                                 |
+|----------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `User` entity (`email`, password hash, `displayName`, `role`)                                                              | This spec                                                                                               | `backend_spec_002_refresh_tokens` (future, stage 2), `backend_spec_003_admin_account_management` (future, stage 3), `frontend_spec_001_basic_login.md`                                  |
+| `POST /api/auth/register`                                                                                                  | This spec                                                                                               | `frontend_spec_001_basic_login.md`                                                                                                                                                      |
+| `POST /api/auth/login`                                                                                                     | This spec                                                                                               | `frontend_spec_001_basic_login.md`                                                                                                                                                      |
+| `GET /api/auth/me`                                                                                                         | This spec                                                                                               | `frontend_spec_001_basic_login.md` — session rehydration on app load                                                                                                                    |
+| `POST /api/auth/logout`                                                                                                    | This spec                                                                                               | `frontend_spec_001_basic_login.md`                                                                                                                                                      |
+| Access-token JWT shape (`sub` = user id, `role` claim, HS256, 15 min)                                                      | `.claude/01-authentication/design-decisions.md` ("Access token")                                        | This spec (issuance/validation); `backend_spec_002_refresh_tokens` (future reissue-on-refresh)                                                                                          |
+| Password policy (BCrypt, min length 12, no complexity rule)                                                                | `.claude/01-authentication/design-decisions.md` ("Password hashing", "Registration / login identifier") | This spec                                                                                                                                                                               |
+| Role column, `USER`/`ADMIN` enum                                                                                           | `.claude/01-authentication/design-decisions.md` ("Access token", "Admin bootstrap")                     | This spec (column only); `backend_spec_003_admin_account_management` (future — first spec to act on the distinction)                                                                    |
+| Email verification (explicitly not built)                                                                                  | `.claude/01-authentication/spec_candidates.md`                                                          | N/A — confirms no verification columns/endpoints belong in this spec                                                                                                                    |
+| Email normalization (lowercase at the `AuthService` boundary)                                                              | This spec (`AUTH-001-AC-18`)                                                                            | `AUTH-001-AC-01` (uniqueness), `AUTH-001-AC-06` (duplicate check), `AUTH-001-AC-10`/`AUTH-001-AC-11` (login lookup) — all within this spec                                              |
+| `JwtAuthenticationFilter` (populates `SecurityContextHolder` from the `access_token` cookie via the existing `JwtService`) | This spec (`AUTH-001-AC-20` through `AUTH-001-AC-23`)                                                   | `AUTH-001-AC-14`/`AUTH-001-AC-15` (makes `GET /api/auth/me`'s `.authenticated()` gate actually work); every future `/api/**` endpoint behind `SecurityConfig`'s `.authenticated()` rule |
+| `JwtService.getClaim` / `AuthService.getUserDetailsById` contracts                                                         | This spec (`AUTH-001-AC-24`, `AUTH-001-AC-25`)                                                          | `AUTH-001-AC-14`/`AUTH-001-AC-15` (the collaborators `AuthController.getCurrentUser` and `JwtAuthenticationFilter` depend on)                                                           |
 
 ## Acceptance Criteria Summary
 
@@ -270,12 +380,18 @@ updated rationale above).
 - [x] AUTH-001-AC-11 [AUTO]: Failed login (bad email or password) returns 401 uniformly, no cookie set
 - [x] AUTH-001-AC-12 [AUTO]: Access-token claims are limited to user id and role
 - [x] AUTH-001-AC-13 [AUTO]: Login response never includes password hash or raw JWT
-- [ ] AUTH-001-AC-14 [AUTO]: `GET /api/auth/me` with a valid cookie returns the current user
-- [ ] AUTH-001-AC-15 [AUTO]: `GET /api/auth/me` with a missing/invalid/expired cookie returns 401
+- [x] AUTH-001-AC-14 [AUTO]: `GET /api/auth/me` with a valid cookie returns the current user
+- [x] AUTH-001-AC-15 [AUTO]: `GET /api/auth/me` with a missing/invalid/expired cookie returns 401
 - [ ] AUTH-001-AC-16 [AUTO]: Logout clears the access-token cookie, returns 200
 - [ ] AUTH-001-AC-17 [AUTO]: A session is actually unusable immediately after logout
-- [x] AUTH-001-AC-18 [AUTO]: Email is normalized to lowercase before any persistence/lookup operation
-- [ ] AUTH-001-AC-19 [AUTO]: Blank or missing login fields return 400, no cookie set
+- [x] AUTH-001-AC-18 [AUTO]: Email is normalised to lowercase before any persistence/lookup operation
+- [x] AUTH-001-AC-19 [AUTO]: Blank or missing login fields return 400, no cookie set
+- [x] AUTH-001-AC-20 [AUTO]: Valid access-token cookie populates SecurityContextHolder before authorisation runs
+- [x] AUTH-001-AC-21 [AUTO]: Missing cookie continues the chain unauthenticated; permitAll routes unaffected
+- [x] AUTH-001-AC-22 [AUTO]: Malformed/expired/invalid-signature cookie is caught, not propagated; SecurityContext stays unauthenticated
+- [x] AUTH-001-AC-23 [AUTO]: JwtAuthenticationFilter is registered in SecurityConfig's chain before AuthorizationFilter
+- [x] AUTH-001-AC-24 [AUTO]: JwtService.getClaim returns claims for a valid token, throws JwtParserException otherwise
+- [x] AUTH-001-AC-25 [AUTO]: AuthService.getUserDetailsById returns the user when found, throws UserException otherwise
 
 ## Test case sketches
 
@@ -497,5 +613,75 @@ def "AUTH-001-AC-19: rejects login with a blank or missing email or password"() 
     then: "the response is 400 Bad Request"
 
     and: "no access-token cookie is set"
+}
+```
+
+```groovy
+def "AUTH-001-AC-20: populates the SecurityContext for a valid access-token cookie"() {
+    given: "a request carrying a valid, unexpired, correctly-signed access-token cookie"
+
+    when: "the request passes through JwtAuthenticationFilter"
+
+    then: "SecurityContextHolder holds an authenticated Authentication for the token's user id and role"
+}
+```
+
+```groovy
+def "AUTH-001-AC-21: leaves the request unauthenticated when no cookie is present"() {
+    given: "a request with no access-token cookie"
+
+    when: "the request passes through JwtAuthenticationFilter"
+
+    then: "SecurityContextHolder has no Authentication set"
+
+    and: "the filter chain continues to the next filter"
+}
+```
+
+```groovy
+def "AUTH-001-AC-22: swallows a malformed, expired, or invalid-signature cookie without a 500"() {
+    given: "a request whose access-token cookie causes JwtService to throw JwtParserException"
+
+    when: "the request passes through JwtAuthenticationFilter"
+
+    then: "no exception propagates out of the filter"
+
+    and: "SecurityContextHolder has no Authentication set"
+
+    and: "the filter chain continues to the next filter"
+}
+```
+
+```groovy
+def "AUTH-001-AC-23: SecurityConfig registers JwtAuthenticationFilter ahead of AuthorizationFilter"() {
+    given: "the configured SecurityFilterChain"
+
+    when: "the filter chain's filter order is inspected"
+
+    then: "JwtAuthenticationFilter runs before AuthorizationFilter"
+}
+```
+
+```groovy
+def "AUTH-001-AC-24: returns claims for a valid token, throws for an invalid one"() {
+    given: "a JWT whose sub/role claims are either both valid, or one is missing/blank/malformed"
+
+    when: "JwtService.getClaim is called with that JWT"
+
+    then: "a valid token returns a JwtClaim with the expected subject and role"
+
+    and: "a token with a missing, blank, or malformed subject or role throws JwtParserException"
+}
+```
+
+```groovy
+def "AUTH-001-AC-25: returns the user when found, throws when not"() {
+    given: "either an existing user's id, or an id matching no user"
+
+    when: "AuthService.getUserDetailsById is called with that id"
+
+    then: "an existing user's id returns a UserResponse for that user"
+
+    and: "an id matching no user throws UserException"
 }
 ```
