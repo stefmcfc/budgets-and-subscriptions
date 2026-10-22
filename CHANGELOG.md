@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-23
+
 ### Added
 - `POST /api/auth/login`: authenticates an existing user against their stored BCrypt hash and
   issues the same signed HS256 JWT access-token cookie registration does, returning `200` with the
