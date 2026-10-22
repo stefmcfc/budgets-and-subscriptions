@@ -382,8 +382,8 @@ controller tests don't exercise directly.
 - [x] AUTH-001-AC-13 [AUTO]: Login response never includes password hash or raw JWT
 - [x] AUTH-001-AC-14 [AUTO]: `GET /api/auth/me` with a valid cookie returns the current user
 - [x] AUTH-001-AC-15 [AUTO]: `GET /api/auth/me` with a missing/invalid/expired cookie returns 401
-- [ ] AUTH-001-AC-16 [AUTO]: Logout clears the access-token cookie, returns 200
-- [ ] AUTH-001-AC-17 [AUTO]: A session is actually unusable immediately after logout
+- [x] AUTH-001-AC-16 [AUTO]: Logout clears the access-token cookie, returns 200
+- [x] AUTH-001-AC-17 [AUTO]: A session is actually unusable immediately after logout
 - [x] AUTH-001-AC-18 [AUTO]: Email is normalised to lowercase before any persistence/lookup operation
 - [x] AUTH-001-AC-19 [AUTO]: Blank or missing login fields return 400, no cookie set
 - [x] AUTH-001-AC-20 [AUTO]: Valid access-token cookie populates SecurityContextHolder before authorisation runs

@@ -57,14 +57,32 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout() {
+        ResponseCookie cookie = createExpiringCookie();
+        return ResponseEntity.status(HttpStatus.OK)
+                .header(HttpHeaders.SET_COOKIE, cookie.toString()).build();
+    }
+
     private ResponseCookie createCookie(String userId, String role) {
+        return buildResponseCookie(userId, role, false);
+    }
+
+    private ResponseCookie createExpiringCookie() {
+        return buildResponseCookie(null, null, true);
+    }
+
+    private ResponseCookie buildResponseCookie(String userId, String role, boolean expiring) {
+        String cookieValue = expiring ? "" : jwtService.createJWT(userId, role);
+        Duration duration = expiring ? Duration.ZERO : Duration.ofMinutes(expiryMinutes);
+
         return ResponseCookie
-                .from(COOKIE_ACCESS_TOKEN, jwtService.createJWT(userId, role))
+                .from(COOKIE_ACCESS_TOKEN, cookieValue)
                 .httpOnly(true)
                 .secure(true)
                 .sameSite("Strict")
                 .path("/")
-                .maxAge(Duration.ofMinutes(expiryMinutes))
+                .maxAge(duration)
                 .build();
     }
 

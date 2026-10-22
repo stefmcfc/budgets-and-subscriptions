@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   missing cookie leaves the request unauthenticated rather than rejected outright (so the
   `permitAll` login/register routes are unaffected), and a malformed/expired/invalid-signature
   cookie is caught rather than surfacing as a `500` (AUTH-001-AC-20 through AC-23).
+- `POST /api/auth/logout`: clears the access-token cookie with an immediately-expiring `Set-Cookie`
+  and responds `200`, with no authentication required to call it; the cleared cookie is honoured
+  immediately, so a subsequent `GET /api/auth/me` with no cookie present responds `401`
+  (AUTH-001-AC-16, AC-17).
 
 ### Fixed
 - `GlobalExceptionHandler`'s `400` validation-error response now returns the real per-field
