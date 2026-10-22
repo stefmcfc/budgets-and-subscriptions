@@ -44,6 +44,7 @@ class AuthControllerSpec extends Specification {
     private static final String ENDPOINT_LOGIN = "/api/auth/login"
     private static final String ENDPOINT_REGISTER = "/api/auth/register"
     private static final String ENDPOINT_GET_CURRENT_USER = "/api/auth/me"
+    private static final String ENDPOINT_LOGOUT = "/api/auth/logout"
 
     private static final String NEW_EMAIL_ADDRESS = "new.user@test.com"
     private static final String VALID_PASSWORD = "validPassword"
@@ -413,20 +414,24 @@ class AuthControllerSpec extends Specification {
     }
 
     def "AUTH-001-AC-16: logout clears the access-token cookie"() {
-        given: "a logged-in user with a valid access-token cookie"
-
         when: "POST /api/auth/logout is requested"
+        def result = mockMvc.perform(post(ENDPOINT_LOGOUT))
 
         then: "the response is 200 OK"
+        result.andExpect(status().isOk())
 
         and: "the response clears the access-token cookie"
+        result.andExpect(cookie().maxAge(COOKIE_ACCESS_TOKEN, 0))
     }
 
     def "AUTH-001-AC-17: the session is unusable immediately after logout"() {
         given: "a logged-in user who has just logged out"
+        mockMvc.perform(post(ENDPOINT_LOGOUT))
 
         when: "GET /api/auth/me is requested using the cookie returned by the logout response"
+        def result = mockMvc.perform(get(ENDPOINT_GET_CURRENT_USER))
 
         then: "the response is 401 Unauthorized"
+        result.andExpect(status().isUnauthorized())
     }
 }

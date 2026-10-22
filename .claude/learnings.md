@@ -1212,3 +1212,56 @@ filter, and now Requirement 8 for these two collaborator contracts, `AUTH-001-AC
 **General tell during review**: grep the spec for every AC label a new/changed test file uses, and
 confirm each one's text still actually describes what that specific test asserts — not just that
 the number existed and was topically nearby.
+
+## Never add a `@SpringBean` mock for the class a `@WebMvcTest(controllers = ...)` is targeting
+
+**Context**: while first drafting the logout test, `AuthControllerSpec` briefly gained
+`@SpringBean AuthController mockAuthController = Mock()` alongside the existing
+`mockAuthService`/`mockJwtService` doubles, with interactions like `1 * mockAuthController.logout()`
+meant to verify "the response clears the cookie."
+
+**Why**: `@WebMvcTest(controllers = AuthController)` exists specifically to stand up a *real*
+`AuthController` bean wired behind `MockMvc` — that's the entire reason to name a controller in
+`controllers = ...`. Replacing that bean with a Spock `Mock()` via `@SpringBean` doesn't just break
+the one new test: it silently breaks *every* test method in the whole spec class, since
+`mockMvc.perform(...)` now routes every request the file sends to a mock with none of the
+controller's real logic. `mockAuthService`/`mockJwtService` are correctly mocked because they're the
+controller's *collaborators*, injected as constructor dependencies — the controller is the one thing
+this kind of test exists to exercise for real, and should never itself be the thing you mock.
+
+**Fix**: never add a `@SpringBean` double for whatever class is named in a `@WebMvcTest`'s
+`controllers = ...`. To verify a response detail like "the cookie got cleared," inspect the actual
+HTTP response (`MockMvcResultMatchers.cookie()...`) rather than trying to verify an internal method
+call on the controller — you don't have access to (and don't need) call verification on the subject
+under test itself.
+
+## `ResponseEntity.BodyBuilder` needs a terminal `.build()`/`.body(...)` — returning the builder itself doesn't typecheck as the `ResponseEntity` you want
+
+**Context**: a `ResponseEntity<Void> logout()` method tried to return
+`ResponseEntity.status(HttpStatus.OK).header(HttpHeaders.SET_COOKIE, cookie.toString())` directly.
+
+**Why**: `.header(...)` returns the same `ResponseEntity.BodyBuilder` it was called on, not a built
+`ResponseEntity` — the fluent chain needs an explicit terminal call. `register`/`login` already have
+a body to attach, so they terminate with `.body(response)`; a response with no body needs the other
+terminal method `BodyBuilder` provides for exactly that case.
+
+**Fix**: `.header(...).build()` — `.build()` is the status-and-headers-only terminator, producing a
+genuine `ResponseEntity<Void>`.
+
+## A MockMvc test can't make "the cookie left after logout" differ from "no cookie" — and shouldn't try to
+
+**Context**: writing `AUTH-001-AC-17` ("the session is unusable immediately after logout") raised
+the question of whether the test needed to literally replay the cookie value from logout's
+`Set-Cookie` response on the following `/me` request.
+
+**Why**: logout's cookie-clear sets `Max-Age=0`, which is exactly the signal a real browser uses to
+delete a cookie outright and never resend it — so "the cookie present on the client immediately
+after logout," from the next request's perspective, *is* no cookie at all. MockMvc doesn't model a
+persistent browser cookie jar across separate `perform()` calls either, so there's no mechanical way
+to make this test's request differ in shape from `AUTH-001-AC-15`'s "no cookie" row, even deliberately.
+
+**Fix**: the value AC-17 adds isn't in the request being novel — it's in chaining the *real* calls
+(an actual `POST /api/auth/logout`, then `GET /api/auth/me` with no cookie attached) rather than
+hand-constructing a cookie-less request from scratch, so the test proves logout's actual effect
+causes the rejection, instead of asserting two unrelated facts independently and trusting they
+compose correctly.
