@@ -1,6 +1,6 @@
 # Dev Startup Scripts (Tooling)
 
-**Status**: Not started
+**Status**: Implemented (2026-10-23)
 **Priority**: P2 — quality-of-life for local development; nothing else depends on this existing,
 but every manual `gradlew.bat bootRun` / `npm run dev` session benefits once it does.
 **Depends on**: None.
@@ -202,19 +202,19 @@ forever waiting for input nobody can supply. The `DEV_SCRIPT_NESTED` check is wh
 
 ## Acceptance Criteria Summary
 
-- [ ] TOOLING-001-AC-01 [AUTO]: Already-running target is skipped, not restarted
-- [ ] TOOLING-001-AC-02 [AUTO]: Backend start gated on a Docker/Postgres preflight check
-- [ ] TOOLING-001-AC-03 [AUTO]: Backend/frontend start in the background, output captured to `logs/`
-- [ ] TOOLING-001-AC-04 [AUTO]: Startup blocks until health-checked ready, or times out with log tail
-- [ ] TOOLING-001-AC-05 [AUTO]: A ready service's owning PID is recorded to `logs/*.pid`
-- [ ] TOOLING-001-AC-06 [AUTO]: `.env` loaded before backend start, without overriding already-set vars
-- [ ] TOOLING-001-AC-07 [AUTO]: Nothing listening is treated as already-stopped
-- [ ] TOOLING-001-AC-08 [AUTO]: Live port-owner PID is re-resolved, never trusted from `.pid` file alone
-- [ ] TOOLING-001-AC-09 [AUTO]: A kill is refused if the resolved PID's process image doesn't match
-- [ ] TOOLING-001-AC-10 [AUTO]: A verified PID is killed and its `.pid` file removed
-- [ ] TOOLING-001-AC-11 [AUTO]: Restart runs stop then start, reporting failure from either step
-- [ ] TOOLING-001-AC-12 [AUTO]: Nested stop/start invocations don't each pause on failure
-- [ ] TOOLING-001-AC-13 [AUTO]: A non-zero exit pauses for a keypress, only when not nested and interactive
+- [x] TOOLING-001-AC-01 [AUTO]: Already-running target is skipped, not restarted
+- [x] TOOLING-001-AC-02 [AUTO]: Backend start gated on a Docker/Postgres preflight check
+- [x] TOOLING-001-AC-03 [AUTO]: Backend/frontend start in the background, output captured to `logs/`
+- [x] TOOLING-001-AC-04 [AUTO]: Startup blocks until health-checked ready, or times out with log tail
+- [x] TOOLING-001-AC-05 [AUTO]: A ready service's owning PID is recorded to `logs/*.pid`
+- [x] TOOLING-001-AC-06 [AUTO]: `.env` loaded before backend start, without overriding already-set vars
+- [x] TOOLING-001-AC-07 [AUTO]: Nothing listening is treated as already-stopped
+- [x] TOOLING-001-AC-08 [AUTO]: Live port-owner PID is re-resolved, never trusted from `.pid` file alone
+- [x] TOOLING-001-AC-09 [AUTO]: A kill is refused if the resolved PID's process image doesn't match
+- [x] TOOLING-001-AC-10 [AUTO]: A verified PID is killed and its `.pid` file removed
+- [x] TOOLING-001-AC-11 [AUTO]: Restart runs stop then start, reporting failure from either step
+- [x] TOOLING-001-AC-12 [AUTO]: Nested stop/start invocations don't each pause on failure
+- [x] TOOLING-001-AC-13 [AUTO]: A non-zero exit pauses for a keypress, only when not nested and interactive
 
 ## Test case sketches
 
