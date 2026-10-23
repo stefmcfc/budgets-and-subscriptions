@@ -28,7 +28,7 @@ beyond what this stage's plain-ledger `Account` needs, not a trivial enum additi
 - A minimum-payment concept, and whether/how a reminder (build order step 5 — general
   date-triggered reminders) hooks into "statement due in N days" the same way it will for
   subscription-renewal review
-- A decision on whether interest/APR modeling belongs in scope at all, or stays purely manual
+- A decision on whether interest/APR modelling belongs in scope at all, or stays purely manual
   entry (a user enters the interest charge as a transaction, same as any other) — leaning toward
   the latter (manual entry, no APR calculation) to avoid rebuilding a credit-card interest engine,
   but worth confirming explicitly when this spec is actually picked up
@@ -42,7 +42,7 @@ with no `INVESTMENT`/`PENSION`/`STOCKS_AND_SHARES_ISA` values.
 **valuation over time** (what is this account worth as of date X), not a stream of discrete
 in/out transactions the way a current account's spending is. Forcing them into the plain-ledger
 `Account`/`Transaction` model (the "treat everything as one transaction ledger" option considered
-and rejected during this design pass) would mean modeling every dividend, contribution, and market
+and rejected during this design pass) would mean modelling every dividend, contribution, and market
 movement as a synthetic "transaction," which is both inaccurate to what's actually happening and a
 poor fit for this stage's running-balance mechanism (a stored, transactionally-maintained balance
 makes little sense for a value that moves with the market, not with discrete user-entered events).
@@ -110,9 +110,9 @@ design and worth its own pass rather than bolting on mid-stream.
     (see above), but the threat it defends against is more "don't leak my bank details in a DB
     dump" than "someone could steal money with just this."
   - Card number + CVV, if ever added (see "Credit cards (full semantics)" above), is a genuinely
-    higher tier — this combination can authorize a payment. **CVV specifically should never be
+    higher tier — this combination can authorise a payment. **CVV specifically should never be
     stored at rest at all** — this mirrors PCI-DSS's explicit prohibition on retaining CVV after
-    authorization, not a judgment call to re-weigh later. If a full card number is ever stored for
+    authorisation, not a judgment call to re-weigh later. If a full card number is ever stored for
     personal reference, store only the **last 4 digits** (how every real wallet/saved-card UI
     displays it back), not the full PAN — there's no legitimate "I need the whole card number for
     my own records" use case the way there is for a bank account number.
@@ -138,7 +138,7 @@ design and worth its own pass rather than bolting on mid-stream.
   (consistent with how `JWT_SECRET_KEY` is already handled) and a documented path to a real
   KMS/envelope-encryption approach later
 - Frontend: masked-by-default display with an explicit reveal toggle on the account detail view
-- A decision on where exactly the encryption key lives in a multi-environment setup (dev vs. a
+- A decision on where exactly the encryption key lives in a multienvironment setup (dev vs. a
   future deployment target) once that question is real, not guessed at now
 - If/when card number is added: last-4-only storage, no CVV capture ever, and a fresh look at
   whether step-up re-auth before reveal is worth it at that point

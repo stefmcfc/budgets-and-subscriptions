@@ -41,9 +41,24 @@ just not this stage's job.
 
 ## Account fields
 
-- **`name`** — free text, user-supplied (e.g. "Current Account with Bank A"), per Q1a's own
-  example. Required, no uniqueness constraint (a user can have two accounts with the same bank
-  under different labels).
+- **`bankName`** + **`accountName`** — two free-text fields, not one, per Q1a's own example
+  ("Current Account with Bank A"). **Revised 2026-10-23**, during `backend_spec_002`'s hand-coded
+  migration review: a single combined `name` field (the original decision) can't be grouped or
+  filtered by bank later without parsing free text back apart, which is fragile. Splitting the two
+  up front keeps `GROUP BY bank_name`/a future "accounts grouped by bank" view trivial. Both
+  required, **no uniqueness constraint on either field or the pair** — a user can have two accounts
+  at the same bank, two accounts with the same account-type label at different banks, or (if they
+  really want) two identical `bankName`/`accountName` pairs; none of that is this app's business to
+  prevent.
+  - **A dedicated `banks` table/entity was considered and rejected as overkill for this stage** —
+    it would add a new entity, repository, and either an on-the-fly-creation or a pick-from-list
+    flow, for a benefit (enforced consistent spelling, room for future bank-level metadata) with no
+    concrete need yet. The tradeoff accepted instead: `bankName` is plain free text with no DB-level
+    consistency enforcement, so "group by bank" only works as well as the user spells the same bank
+    name the same way across their own accounts. Cheap mitigation if this ever actually bites:
+    suggest previously-used `bankName` values as autocomplete options in the frontend, no schema
+    change required. Promote to a real `Bank` entity later only if a genuine need shows up (e.g. a
+    future bank-level feature wanting more than a name).
 - **`type`** — the `AccountType` enum above.
 - **`openingBalance`** (`BigDecimal`) + **`openedOn`** (date) — how a user adds an account that
   already has money in it: the balance as of a specific date, rather than requiring every
@@ -52,6 +67,14 @@ just not this stage's job.
   dated before the account's own opening balance date doesn't have a coherent "starting point" to
   apply against).
 - **`balance`** (`BigDecimal`) — see "Running balance," next.
+- **Monetary columns use `NUMERIC(19, 2)` in Postgres**, not a smaller precision like `NUMERIC(9,
+  2)`. Postgres `NUMERIC` storage is variable-length based on the actual value stored, not the
+  declared precision, so this costs nothing extra for a normal balance — `19` is simply a
+  conventional "as big as you'd ever plausibly need" ceiling (roughly the range a 64-bit
+  integer-cents column would cover), not an arbitrary guess. `2` decimal places (pennies) is
+  correct, not `4` — this app is single-currency GBP with no conversion arithmetic happening in it
+  (per `product.md`'s Known Constraints), so there's no legitimate sub-penny value to represent.
+  Applies to `openingBalance`/`balance` here and to `Transaction.amount` once that spec exists.
 - **Owner** — every `Account` carries an owning `User` reference (FK), consistent with
   `product.md`'s "every entity carries an owner/user reference once auth exists" readiness note
   and this app's multi-user design. An account belongs to exactly one user; there is no shared/joint
@@ -107,8 +130,9 @@ Decided 2026-10-23: **two stages, four specs** (a backend + frontend pair for ea
 auth feature's own per-stage backend/frontend pairing rather than one monolithic
 accounts-and-transactions spec:
 
-1. **`accounts`** — `Account` entity (`AccountType` enum, `name`, `openingBalance`, `openedOn`,
-   `balance`, owner FK), full CRUD, list/view a user's own accounts only.
+1. **`accounts`** — `Account` entity (`AccountType` enum, `bankName`, `accountName`,
+   `openingBalance`, `openedOn`, `balance`, owner FK), full CRUD, list/view a user's own accounts
+   only.
 2. **`transactions`** — `Transaction` entity (`amount`, `date`, `description`, account FK), full
    CRUD scoped to an account the current user owns, and the transactionally-maintained running
    balance described above.
