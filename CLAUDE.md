@@ -70,6 +70,19 @@ machine's global versioning defaults).
   "This PR added its own `[Unreleased]` entry" and "the release was actually cut at merge time" are
   two separate checks; passing the first doesn't imply the second, so re-verify both at every merge
   even when the previous one already got it right.
+- **Tag the merge commit once a release-cut PR actually lands on `main`**: an annotated tag,
+  `git tag -a vX.Y.Z -m "..."` followed by `git push origin vX.Y.Z`, matching the version just cut.
+  This makes the commit that was actually released directly identifiable via `git tag`, not just
+  inferable from `CHANGELOG.md`'s dated sections. Pushing a tag is a shared-remote action — confirm
+  with the user first, same as any other push, rather than doing it silently as part of the merge.
+
+### Commit message convention
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`,
+`fix:`, `chore:`, `docs:`, `test:`, `refactor:`, optionally scoped (`feat(backend):`,
+`feat(frontend):`, `feat(tooling):`, `chore(release):`), with `!` after the type/scope or a
+`BREAKING CHANGE:` footer for a breaking change. Matches the pattern already used across this
+repo's real commit history.
 
 ## Deep-dive references
 
