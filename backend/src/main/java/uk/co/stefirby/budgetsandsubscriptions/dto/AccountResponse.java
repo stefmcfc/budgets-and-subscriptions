@@ -8,7 +8,8 @@ import java.util.UUID;
 
 public record AccountResponse(
         UUID id,
-        String name,
+        String bankName,
+        String accountName,
         AccountType type,
         BigDecimal openingBalance,
         LocalDate openedOn,

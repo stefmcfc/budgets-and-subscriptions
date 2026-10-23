@@ -28,8 +28,8 @@ class AccountControllerSpec extends Specification {
         then: "the created account's owner is the authenticated user, not the id from the request body"
     }
 
-    def "BACKEND-002-AC-09: rejects account creation with a blank or missing name"() {
-        given: "a creation request with a blank or missing name"
+    def "BACKEND-002-AC-09: rejects account creation with a blank or missing bank name or account name"() {
+        given: "a creation request with a blank or missing bankName or accountName"
 
         when: "POST /api/accounts is requested"
 
@@ -112,7 +112,7 @@ class AccountControllerSpec extends Specification {
     // PATCH /api/accounts/{id} tests
     //=================================
 
-    def "BACKEND-002-AC-17: updates an owned account's name and/or type"() {
+    def "BACKEND-002-AC-17: updates an owned account's bank name, account name, and/or type"() {
         given: "an account owned by the authenticated user and a valid update request"
 
         when: "PATCH /api/accounts/{id} is requested with that account's id"
@@ -130,8 +130,8 @@ class AccountControllerSpec extends Specification {
         and: "no account is modified"
     }
 
-    def "BACKEND-002-AC-19: rejects an update with a blank name"() {
-        given: "an account owned by the authenticated user and an update request with a blank name"
+    def "BACKEND-002-AC-19: rejects an update with a blank bank name or account name"() {
+        given: "an account owned by the authenticated user and an update request with a blank bankName or accountName"
 
         when: "PATCH /api/accounts/{id} is requested"
 
@@ -149,7 +149,7 @@ class AccountControllerSpec extends Specification {
 
         and: "the account's openingBalance, openedOn, and balance are unchanged from before the request"
 
-        and: "only name and/or type reflect the request"
+        and: "only bankName, accountName, and/or type reflect the request"
     }
 
     //---------------------------------

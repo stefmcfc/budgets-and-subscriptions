@@ -6,7 +6,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 public record AccountCreateRequest(
-        String name,
+        String bankName,
+        String accountName,
         AccountType type,
         BigDecimal openingBalance,
         LocalDate openedOn

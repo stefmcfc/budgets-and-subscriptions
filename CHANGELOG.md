@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `Account` JPA entity and the `V002__create_accounts_table.sql` Flyway migration, backing the
+  in-progress accounts feature (`backend_spec_002_accounts.md`): required `bankName`/`accountName`
+  (split so accounts can later be grouped by bank), `type` restricted to `CURRENT`/`SAVINGS`/
+  `CASH_ISA`, a required owner, and `balance` seeded from `openingBalance` at construction
+  (`BACKEND-002-AC-01` through `AC-06`).
+
 ## [0.6.0] - 2026-10-23
 
 ### Added
