@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-23
+
 ### Added
 - `scripts/start-dev.sh`, `scripts/stop-dev.sh`, `scripts/restart-dev.sh` (`tooling_spec_001_dev_startup_scripts.md`):
   start/stop/restart the backend and/or frontend dev servers in the background, idempotently,
