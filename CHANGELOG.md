@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-23
+
+### Added
+- `README.md` (`tooling_spec_003_repo_conventions.md`): what the app is, getting started (manual
+  and scripted run paths), local ports, and links out to `.claude/steering/`/`CHANGELOG.md` rather
+  than duplicating them.
+- `.editorconfig`, derived from this repo's actual existing indentation (4-space Java/Kotlin,
+  2-space TS/YAML/CSS) so adopting it produces zero diff noise on any existing file.
+- `.github/pull_request_template.md`: a lightweight checklist (tests, `CHANGELOG` entry, migration
+  if relevant) scoped to what this repo's process actually has.
+- `CLAUDE.md` now documents the Conventional Commits convention and tagging each release's merge
+  commit with an annotated git tag.
+- `server.shutdown: graceful` in `application.yaml` — idiomatic Spring Boot practice for shutdown
+  paths that give the JVM a normal signal/hook invocation (e.g. a future `docker stop`). Found
+  during implementation that this does *not* help `scripts/stop-dev.sh`'s `taskkill` on this
+  machine — that process can only be force-killed, which skips JVM shutdown hooks regardless of
+  this setting; documented honestly rather than left as an inaccurate claim.
+
 ## [0.5.0] - 2026-10-23
 
 ### Added

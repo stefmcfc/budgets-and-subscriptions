@@ -137,21 +137,24 @@ did it.
 
 ### Adopt now — cheap and genuinely useful here
 
-- [ ] **README.md** — the actual gap; not even flagged by the original question since it assumed
+- [x] **README.md** — the actual gap; not even flagged by the original question since it assumed
   one already existed. (`tooling_spec_003_repo_conventions.md`)
-- [ ] **Conventional Commits** — already organically close to this in recent commit messages;
+- [x] **Conventional Commits** — already organically close to this in recent commit messages;
   worth making explicit in `CLAUDE.md`. (`tooling_spec_003_repo_conventions.md`)
-- [ ] **Annotated git tags at each release** (`git tag -a v0.5.0`) — SemVer + a dated `CHANGELOG.md`
+- [x] **Annotated git tags at each release** (`git tag -a v0.5.0`) — SemVer + a dated `CHANGELOG.md`
   section already happen at each release; a tag on the actual merge commit is the missing piece.
   (`tooling_spec_003_repo_conventions.md`)
-- [ ] **`server.shutdown=graceful`** — free Spring Boot property; lets in-flight requests finish
-  before `stop-dev.sh`'s `taskkill` lands. (`tooling_spec_003_repo_conventions.md`)
-- [ ] **`.editorconfig`** — free, keeps formatting consistent between IntelliJ and any future tool.
+- [x] **`server.shutdown=graceful`** — free, idiomatic Spring Boot property. Added, but found
+  during implementation that it does *not* help `stop-dev.sh`'s `taskkill` on this machine — that
+  process can only be killed with `/F` (`TerminateProcess`), which skips JVM shutdown hooks
+  entirely regardless of this setting. Still worth keeping for other shutdown paths (foreground
+  Ctrl+C, a future `docker stop`). (`tooling_spec_003_repo_conventions.md`)
+- [x] **`.editorconfig`** — free, keeps formatting consistent between IntelliJ and any future tool.
   (`tooling_spec_003_repo_conventions.md`)
 
 ### Worth it later — not urgent, no action yet
 
-- [ ] **PR template** (lightweight: tests pass, CHANGELOG entry, migration if relevant) — brought
+- [x] **PR template** (lightweight: tests pass, CHANGELOG entry, migration if relevant) — brought
   forward into `tooling_spec_003_repo_conventions.md` ahead of the rest of this group, at the
   user's request.
 - [ ] **Actuator `/health`** — would replace `tooling_spec_001`'s current hack of polling

@@ -1,6 +1,6 @@
 # Repo Conventions: README, Commit Style, Release Tags, Graceful Shutdown, Editor Config, PR Template (Tooling)
 
-**Status**: Not started
+**Status**: Implemented (2026-10-23)
 **Priority**: P2 — quality-of-life and documentation; nothing else depends on this existing, but
 every future session/contributor (including future-Claude) benefits once it does.
 **Depends on**: None.
@@ -31,8 +31,10 @@ covers all six:
    close to what recent commit messages do).
 3. Annotated git tags at each release (`git tag -a v0.5.0`), documented alongside the existing
    SemVer/`CHANGELOG.md` versioning convention in `CLAUDE.md`.
-4. `server.shutdown: graceful` in `application.yaml` — lets in-flight requests finish before
-   `scripts/stop-dev.sh`'s `taskkill` lands, rather than racing it.
+4. `server.shutdown: graceful` in `application.yaml` — idiomatic Spring Boot practice for shutdown
+   paths that give the JVM a normal signal/hook invocation. (Found during implementation: this
+   does *not* help `scripts/stop-dev.sh`'s `taskkill` on this machine — see Requirement 4's
+   correction below for why — but is still worth keeping for other shutdown paths.)
 5. A root `.editorconfig`, matching this repo's actual existing indentation conventions exactly (so
    adopting it produces zero diff noise on any existing file).
 6. A lightweight `.github/pull_request_template.md` — a lightweight checklist rather than the
@@ -133,28 +135,45 @@ the same explicit go-ahead any push already does under this repo's working agree
 
 ## Requirement 4: Graceful shutdown
 
-**User story**: As the person running `scripts/stop-dev.sh` against a live backend, I want
-in-flight requests to finish rather than being cut off mid-response when the process is killed.
+**User story**: As the person running the backend, I want it to use Spring Boot's idiomatic
+graceful-shutdown behavior for any shutdown path that actually gives it the chance to — even
+though, as this AC's implementation found, `stop-dev.sh`'s specific kill mechanism on this machine
+turns out not to be one of them.
 
 ### TOOLING-003-AC-05 [AUTO]: Backend shuts down gracefully
 **Statement**: `backend/src/main/resources/application.yaml` shall set `server.shutdown: graceful`,
 such that an in-flight HTTP request is allowed to complete before the embedded Tomcat server stops
-accepting new work and the JVM exits.
+accepting new work and the JVM exits, for any shutdown path that delivers a normal shutdown
+signal/hook invocation to the JVM.
 
-**Rationale**: Directly relevant to `tooling_spec_001_dev_startup_scripts.md`'s `stop-dev.sh`,
-which currently sends `taskkill /PID ... /T /F` — a forceful kill with no grace period. Spring
-Boot's graceful shutdown handles the "stop accepting new requests, finish what's in flight, then
-exit" sequence inside the JVM itself before the process actually terminates; it doesn't change
-`taskkill`'s own behavior, but gives the application a chance to reach a clean stopping point
-first if shutdown isn't instant.
+**Rationale**: Still correct, idiomatic Spring Boot practice — applies to shutdown paths like
+Ctrl+C on a foreground `gradlew.bat bootRun`, or `docker stop`'s `SIGTERM` once
+`tooling_spec_002_docker_app_images.md` exists.
+
+**Correction found during implementation**: the Overview's original framing — that this helps
+`stop-dev.sh`'s `taskkill` specifically — does not hold on this machine, and was verified
+empirically rather than assumed. A `java.exe` process launched the way `start-dev.sh` launches it
+(via `gradlew.bat` under `nohup`, backgrounded, no console control handler) refuses a non-forceful
+`taskkill` outright (`"This process can only be terminated forcefully (with /F option)"`), confirmed
+twice against a real running backend. `stop-dev.sh` already has to use `/F` unconditionally for
+this process shape to be killable at all — not as a choice that happens to skip graceful shutdown,
+but because the non-forceful path isn't available here in the first place. `/F` maps to Windows'
+`TerminateProcess`, which gives the JVM no opportunity to run shutdown hooks, so `server.shutdown:
+graceful` has no observable effect via `stop-dev.sh` on this setup. The property is still worth
+keeping for the shutdown paths named above; `tooling_spec_001_dev_startup_scripts.md` is not
+affected by this finding (it was never relying on graceful shutdown to be correct) and needs no
+change.
 
 **References**: `backend/src/main/resources/application.yaml`,
-`tooling_spec_001_dev_startup_scripts.md` (`stop-dev.sh`)
+`tooling_spec_001_dev_startup_scripts.md` (`stop-dev.sh` — confirmed unaffected by this AC)
 
-**Test Case (Green)**: start the backend, issue a request designed to take a few seconds (or
-confirm via Spring Boot's startup log line showing graceful shutdown is enabled), trigger
-`stop-dev.sh backend` mid-request, and confirm the in-flight request completes with a normal
-response rather than a connection reset.
+**Test Case (Green)**: confirmed via direct reproduction rather than a startup-log check (no such
+log line exists — Spring Boot logs graceful shutdown only when shutdown actually begins, not at
+startup): started the real backend, attempted `taskkill /PID <pid>` with no `/F`, twice, both
+refused by Windows with `"can only be terminated forcefully"`. The config change itself
+(`server.shutdown: graceful` present in `application.yaml`, confirmed applied after a backend
+restart) is still the correct deliverable for this AC — the test case documents why its
+originally-stated benefit to `stop-dev.sh` doesn't materialize here, rather than claiming it does.
 
 ## Requirement 5: `.editorconfig`
 
@@ -213,23 +232,23 @@ the checklist renders and reflects only real, current repo process.
 |---|---|
 | `.claude/00-initial-setup/04-recommended-conventions.md` | The assessment pass this spec implements the "Adopt now" group of, plus the pulled-forward PR template item |
 | `.claude/steering/product.md`, `tech.md`, `structure.md`, `frontend_structure.md` | Source content the README links to/summarizes |
-| `tooling_spec_001_dev_startup_scripts.md` | `stop-dev.sh`'s `taskkill` behavior that graceful shutdown mitigates against; the scripted run path the README documents |
+| `tooling_spec_001_dev_startup_scripts.md` | The scripted run path the README documents; confirmed during this spec's implementation that its `stop-dev.sh` is unaffected by `server.shutdown: graceful` (see Requirement 4) |
 | `.gitattributes` | Existing `eol` rules `.editorconfig` must stay consistent with, not duplicate |
 | Root `CLAUDE.md`'s "Versioning & Changelog defaults" | Where the Conventional Commits and release-tag conventions are documented |
 | `backend/src/main/resources/application.yaml` | Existing config file gaining `server.shutdown: graceful` |
 
 ## Acceptance Criteria Summary
 
-- [ ] TOOLING-003-AC-01 [AUTO]: `README.md` exists with description, getting-started (manual +
+- [x] TOOLING-003-AC-01 [AUTO]: `README.md` exists with description, getting-started (manual +
   scripted), and ports
-- [ ] TOOLING-003-AC-02 [AUTO]: README links to steering docs/CHANGELOG rather than duplicating them
-- [ ] TOOLING-003-AC-03 [AUTO]: `CLAUDE.md` documents the Conventional Commits convention
-- [ ] TOOLING-003-AC-04 [AUTO]: `CLAUDE.md` documents annotated-tagging the merge commit at each
+- [x] TOOLING-003-AC-02 [AUTO]: README links to steering docs/CHANGELOG rather than duplicating them
+- [x] TOOLING-003-AC-03 [AUTO]: `CLAUDE.md` documents the Conventional Commits convention
+- [x] TOOLING-003-AC-04 [AUTO]: `CLAUDE.md` documents annotated-tagging the merge commit at each
   release
-- [ ] TOOLING-003-AC-05 [AUTO]: `application.yaml` sets `server.shutdown: graceful`
-- [ ] TOOLING-003-AC-06 [AUTO]: `.editorconfig` matches real existing indentation conventions
+- [x] TOOLING-003-AC-05 [AUTO]: `application.yaml` sets `server.shutdown: graceful`
+- [x] TOOLING-003-AC-06 [AUTO]: `.editorconfig` matches real existing indentation conventions
   exactly, zero diff noise
-- [ ] TOOLING-003-AC-07 [AUTO]: `.github/pull_request_template.md` exists with a repo-appropriate
+- [x] TOOLING-003-AC-07 [AUTO]: `.github/pull_request_template.md` exists with a repo-appropriate
   (not enterprise) checklist
 
 ## Test case sketches
@@ -241,8 +260,9 @@ once during implementation and reported.
 ```
 1. Write README.md, confirm every documented command actually runs as written.
 2. Add the Conventional Commits + release-tag sections to CLAUDE.md.
-3. Add server.shutdown: graceful to application.yaml; restart the backend and confirm the startup
-   log shows graceful shutdown is enabled.
+3. Add server.shutdown: graceful to application.yaml; restart the backend to confirm it applies.
+   Reality-check its claimed benefit to stop-dev.sh by attempting a non-forced taskkill against
+   the real running backend -- document the actual result rather than assuming.
 4. Write .editorconfig; open one file of each covered type and confirm no reformatting is
    suggested.
 5. Write .github/pull_request_template.md; preview it on GitHub.
