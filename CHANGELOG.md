@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-23
+
+### Added
+- `scripts/start-dev.sh`, `scripts/stop-dev.sh`, `scripts/restart-dev.sh` (`tooling_spec_001_dev_startup_scripts.md`):
+  start/stop/restart the backend and/or frontend dev servers in the background, idempotently,
+  with output captured to `logs/`. Starting the backend is gated on a Docker/Postgres preflight
+  check; stopping always re-resolves the live port-owner PID and refuses to kill a process whose
+  image doesn't match what's expected (`java.exe`/`node.exe`), rather than trusting a possibly
+  stale `.pid` file. Both scripts load `JWT_SECRET_KEY` from the repo-root `.env` before starting
+  the backend, and pause on a keypress before an auto-spawned window closes on failure
+  (TOOLING-001-AC-01 through AC-13).
+
 ## [0.4.0] - 2026-10-23
 
 ### Added
