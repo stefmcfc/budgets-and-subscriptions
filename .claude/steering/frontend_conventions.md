@@ -19,7 +19,7 @@
 - All backend calls go through `src/services/*Api.ts` — never call `axios`/`fetch` directly from
   a component
 - Base URL comes from `import.meta.env.VITE_API_BASE`, falling back to
-  `http://localhost:8090/api/v1` (Vite env convention — not `process.env`)
+  `http://localhost:8090/api` (Vite env convention — not `process.env`)
 - Errors are centralized: a shared `request<T>()` wrapper catches axios errors and throws a typed
   `ApiError` (`src/types/api.ts`) with `status`, `message`, and optional `details`
 
@@ -29,7 +29,7 @@ import axios from 'axios';
 import type { Account } from '../types/account';
 import { ApiError } from '../types/api';
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8090/api/v1';
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8090/api';
 const client = axios.create({ baseURL: API_BASE });
 
 export const accountApi = {
@@ -113,7 +113,7 @@ describe('AccountList', () => {
 
 - Create `.env.local` in `frontend/` (git-ignored)
 - Use `VITE_` prefix
-- Example: `VITE_API_BASE=http://localhost:8090/api/v1`
+- Example: `VITE_API_BASE=http://localhost:8090/api`
 - Access via `import.meta.env.VITE_API_BASE`
 
 ## Code Style

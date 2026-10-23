@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-23
+
+### Added
+- Frontend half of stage 1 authentication (`frontend_spec_001_basic_login.md`): `RegisterForm`
+  and `LoginForm` (accessible labeled fields, sign-up/sign-in autofill attributes, client-side
+  validation on registration, pending/error states), an `AuthProvider`/`useAuth` context that
+  resolves the session once via `GET /api/auth/me` on load without persisting anything to
+  browser storage, a `ProtectedRoute` guard with a distinct loading state so no protected content
+  flashes before the session check resolves, and a logout action — plus the `authApi` service
+  layer and shared `request<T>()`/`ApiError` wrapper (`src/services/client.ts`) all backend calls
+  now go through (AUTH-002-AC-01 through AC-22).
+- Routing (`react-router-dom`): `/login`, `/register`, and a `/` route guarded by
+  `ProtectedRoute`, wired up in `App.tsx`.
+
+### Fixed
+- `frontend/src/test-setup.ts` now imports `@testing-library/jest-dom/vitest` instead of the
+  plain `@testing-library/jest-dom` entry point — the installed `jest-dom` v7 only type-augments
+  Vitest's `expect` via that subpath, so `tsc -b` (and therefore `npm run build`) failed on every
+  jest-dom matcher used in a test file even though `vitest run` itself passed.
+
 ## [0.3.0] - 2026-10-23
 
 ### Added
