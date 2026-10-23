@@ -1,0 +1,3 @@
+-- Scaffolded placeholder (backend_spec_002_accounts.md). Real DDL for the `accounts` table
+-- (columns, FK to users, constraints matching the Account entity's JPA mapping per
+-- BACKEND-002-AC-06) is the human's to write here.
