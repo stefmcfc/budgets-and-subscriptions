@@ -13,7 +13,7 @@ that captures the requirement — complex ACs may combine clauses (When … , if
 | Pattern | Template | Example |
 |---|---|---|
 | Ubiquitous | The `<system>` shall `<response>` | The `AccountEntity` shall default `currency` to `GBP` |
-| Event-driven | When `<trigger>`, the `<system>` shall `<response>` | When `POST /api/v1/accounts` is requested, the `AccountController` shall create and return the new account |
+| Event-driven | When `<trigger>`, the `<system>` shall `<response>` | When `POST /api/accounts` is requested, the `AccountController` shall create and return the new account |
 | State-driven | While `<state>`, the `<system>` shall `<response>` | While a fetch is in flight, the `AccountList` component shall display a loading spinner |
 | Unwanted behaviour | If `<condition>`, then the `<system>` shall `<response>` | If `accountApi.getAll()` rejects, then the `AccountList` component shall display an error message with a Retry button |
 | Optional feature | Where `<feature is present>`, the `<system>` shall `<response>` | Where a transaction matches a known merchant pattern, the classification engine shall suggest a category |
@@ -120,7 +120,7 @@ authenticated principal, never the request body.
 
 ```markdown
 ### BACKEND-005-AC-01 [AUTO]: Create an Account
-**Statement**: When `POST /api/v1/accounts` is requested with a valid body, the
+**Statement**: When `POST /api/accounts` is requested with a valid body, the
 `AccountController` shall create and return the new account with `201 Created`.
 
 **Rationale**: Users need an account to exist before transactions can be logged against it.
@@ -134,7 +134,7 @@ authenticated principal, never the request body.
 def "BACKEND-005-AC-01: creates and returns a new account"() {
     given: "a valid account request body"
 
-    when: "POST /api/v1/accounts is requested"
+    when: "POST /api/accounts is requested"
 
     then: "the response is 201 with the created account"
 }
@@ -177,8 +177,8 @@ def "BACKEND-005-AC-01: creates and returns a new account"() {
     given: "a valid create-account request"
         def request = new AccountRequest(name: "Current Account", type: AccountType.BANK_CURRENT)
 
-    when: "POST /api/v1/accounts is requested"
-        def response = client.post().uri("/api/v1/accounts").body(request).exchange()
+    when: "POST /api/accounts is requested"
+        def response = client.post().uri("/api/accounts").body(request).exchange()
 
     then: "the response is 201 Created"
         response.expectStatus().isCreated()

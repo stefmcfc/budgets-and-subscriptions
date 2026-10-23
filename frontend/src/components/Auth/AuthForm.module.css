@@ -1,0 +1,58 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 360px;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field input {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 16px;
+}
+
+.error {
+  margin: 0;
+  color: var(--accent);
+  font-size: 14px;
+}
+
+.formError {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text-h);
+  background: var(--accent-bg);
+  font-size: 14px;
+}
+
+.status {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.submit {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

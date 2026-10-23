@@ -74,7 +74,7 @@ Centralized in `src/types/` once it exists. Nullable backend fields are `T | nul
 
 ```
 # frontend/.env.local (git-ignored, not present by default)
-VITE_API_BASE=/api/v1
+VITE_API_BASE=/api
 ```
 
 Only needed to override the Vite dev-server proxy. Not needed for normal `npm run dev` usage,
