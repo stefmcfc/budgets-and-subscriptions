@@ -1,6 +1,6 @@
 # Accounts (Backend)
 
-**Status**: In progress (AC-01 through AC-06 done, 2026-10-23)
+**Status**: In progress (AC-01 through AC-12 done, 2026-10-26)
 **Priority**: P1 — first spec of build order step 2 ("Accounts and transactions"); every
 account-scoped feature (transactions, spending insights, multi-person balances) depends on an
 `Account` existing to attach to.
@@ -271,12 +271,12 @@ AC exists as a tested regression guard for that default, not to introduce new fi
 - [x] BACKEND-002-AC-04 [AUTO]: `Account` persistence fails with no owner set
 - [x] BACKEND-002-AC-05 [AUTO]: New `Account`'s `balance` is initialised equal to `openingBalance`
 - [x] BACKEND-002-AC-06 [AUTO]: `accounts` table schema matches entity mapping at startup
-- [ ] BACKEND-002-AC-07 [AUTO]: Valid `POST /api/accounts` creates and returns the account, 201
-- [ ] BACKEND-002-AC-08 [AUTO]: Created account's owner always comes from the authenticated principal, never the request body
-- [ ] BACKEND-002-AC-09 [AUTO]: Blank/missing `bankName` or `accountName` on create returns 400, no account created
-- [ ] BACKEND-002-AC-10 [AUTO]: Missing/invalid `type` on create returns 400, no account created
-- [ ] BACKEND-002-AC-11 [AUTO]: Missing `openingBalance` on create returns 400, no account created
-- [ ] BACKEND-002-AC-12 [AUTO]: Missing or future `openedOn` on create returns 400, no account created
+- [x] BACKEND-002-AC-07 [AUTO]: Valid `POST /api/accounts` creates and returns the account, 201
+- [x] BACKEND-002-AC-08 [AUTO]: Created account's owner always comes from the authenticated principal, never the request body
+- [x] BACKEND-002-AC-09 [AUTO]: Blank/missing `bankName` or `accountName` on create returns 400, no account created
+- [x] BACKEND-002-AC-10 [AUTO]: Missing/invalid `type` on create returns 400, no account created
+- [x] BACKEND-002-AC-11 [AUTO]: Missing `openingBalance` on create returns 400, no account created
+- [x] BACKEND-002-AC-12 [AUTO]: Missing or future `openedOn` on create returns 400, no account created
 - [ ] BACKEND-002-AC-13 [AUTO]: `GET /api/accounts` returns only the authenticated user's own accounts
 - [ ] BACKEND-002-AC-14 [AUTO]: `GET /api/accounts` returns an empty list when the user has no accounts
 - [ ] BACKEND-002-AC-15 [AUTO]: `GET /api/accounts/{id}` returns an owned account, 200

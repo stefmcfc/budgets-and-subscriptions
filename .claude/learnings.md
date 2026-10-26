@@ -132,6 +132,55 @@ is only needed to get a consistent, custom error-response shape across endpoints
 Spring's default `ProblemDetail`, pulling field errors from `BindingResult.getFieldErrors()`
 rather than `ConstraintViolationException.getConstraintViolations()`.
 
+## Jakarta Bean Validation's `@NotBlank`/`@NotEmpty` only apply to specific target types — using them elsewhere fails at runtime, not compile time
+
+**Context**: `AccountCreateRequest` (`BACKEND-002-AC-07`..`AC-12`) first had `@NotBlank` on `type`
+(an `AccountType` enum) and `@NotEmpty` on `openingBalance` (`BigDecimal`) and `openedOn`
+(`LocalDate`), alongside the correct `@NotBlank` on the two `String` fields. The code compiled
+fine, and `AccountControllerSpec`'s AC-07 happy-path test started failing with `500` instead of
+`201`.
+
+**Why**: `@NotBlank` only validates `CharSequence`; `@NotEmpty` only validates `CharSequence`,
+`Collection`, `Map`, or an array. Neither carries any meaning for an enum, a `BigDecimal`, or a
+`LocalDate` — there's no "blank"/"empty" concept for any of them, just present-or-absent.
+Hibernate Validator doesn't catch this at compile time (annotations are just metadata to `javac`);
+it only discovers the mismatch the first time it actually tries to validate an instance of the
+class, throwing `jakarta.validation.UnexpectedTypeException` ("HV000030: No validator could be
+found for constraint ... validating type ..."). `GlobalExceptionHandler`'s catch-all turns that
+into an unhelpful `500`, which made the symptom look like a controller/service bug rather than a
+DTO-annotation mismatch.
+
+**Fix**: use `@NotNull` for any field whose type has no "blank"/"empty" concept — an enum, a
+number, a date, or anything else that isn't a `CharSequence`/collection-like type. Reach for
+`@NotBlank` only on real `String` fields, `@NotEmpty` only when the type genuinely is a
+collection/array/map. **General tell**: if a `500` shows up on a request that should cleanly fail
+validation with `400`, check whether every Bean Validation annotation on the DTO is even
+applicable to its field's declared type before looking anywhere else.
+
+## An invalid enum string in a JSON body fails before Bean Validation ever runs — a different exception type than a missing/blank field
+
+**Context**: `BACKEND-002-AC-10` needs both a missing `type` and a `type` value outside
+`CURRENT`/`SAVINGS`/`CASH_ISA` to return `400`. The spec's own rationale already flagged these as
+two different failure mechanisms; this came up again confirming it directly instead of assuming
+it was already handled.
+
+**Why**: a missing `type` deserializes fine (Jackson just leaves the field `null`), then fails
+Bean Validation's `@NotNull` check, raising `MethodArgumentNotValidException` — already mapped to
+`400` by `GlobalExceptionHandler`. An unrecognized string like `"NOT_A_REAL_TYPE"` can't be turned
+into an `AccountType` at all — Jackson fails *during deserialization*, before `@Valid`/Bean
+Validation ever runs, and Spring wraps that as `HttpMessageNotReadableException` instead.
+`GlobalExceptionHandler` had no handler for that exception type, so this sub-case fell through to
+the catch-all and returned `500`.
+
+**Fix**: add a dedicated `@ExceptionHandler(HttpMessageNotReadableException.class)` mapped to
+`400` — the missing-field and invalid-value halves of the same AC genuinely need two different
+handlers to both pass. **Testing it**: since the DTO (`AccountCreateRequest`) has no way to
+construct an invalid enum value (the enum simply has no such constant), express the invalid
+request as a raw `Map` serialized through the already-autowired `ObjectMapper`
+(`objectMapper.writeValueAsString(["type": "NOT_A_REAL_TYPE", ...])`) instead of the typed DTO —
+the same technique `AC-08`'s client-supplied-owner-id test needed, for the same underlying reason:
+the attack surface here is the wire format, not anything the compiler can help construct.
+
 ## `Stream.toString()` doesn't describe its elements — collect it before putting it in a response
 
 **Context**: `GlobalExceptionHandler.handleMethodArgumentNotValidException` built its error message
@@ -962,6 +1011,29 @@ correct Groovy-inspection suppression annotation above just that method, leaving
 active for everything else in the file. Same category as the `JwtService`/SonarLint entry above —
 a framework-specific blind spot in static analysis, worth suppressing locally once confirmed to be
 a false positive rather than disabling the inspection project-wide.
+
+## A non-static Groovy nested class breaks IntelliJ's map-constructor resolution, even though it works fine at actual Groovy runtime
+
+**Context**: a test helper added a nested `class AuthenticatedUser { UUID id; String jwt }` inside
+`AccountControllerSpec`, with a helper method returning `new AuthenticatedUser(id: ..., jwt: ...)`.
+IntelliJ flagged that line: "Cannot apply default constructor for class 'AuthenticatedUser'."
+Temporarily wiring the helper into a real test and running it passed cleanly — no error at all.
+
+**Why**: a non-static nested class carries an implicit reference to its enclosing instance (same
+as Java), so its real constructor takes that outer instance as a hidden parameter — there's no
+true no-arg constructor for Groovy's map-style construction sugar (`new X(a: 1, b: 2)`, itself
+built on top of a genuine no-arg constructor plus property setters) to target. At runtime this
+still works, because the helper method is itself an instance method of the enclosing
+`AccountControllerSpec`, so Groovy's dynamic dispatch can supply the implicit outer reference
+automatically when constructing the inner class. IntelliJ's static Groovy inspector doesn't model
+that resolution path for the named-argument constructor form, so it warns about something that's
+actually fine — another instance of an IDE/Groovy-runtime blind spot, same family as the
+SonarLint-suppression and "method may be static" entries above.
+
+**Fix**: make the nested class `static` whenever it doesn't actually need the enclosing instance
+(a pure data holder, as here) — it gets a genuine no-arg constructor, the warning disappears, and
+it stops silently carrying a reference to the whole enclosing `Specification` (and everything that
+drags in — `MockMvc`, mocked Spring beans, etc.) for no reason.
 
 ## A field annotated `@Mock` isn't a Spock mock unless it's also created via `Mock()`/`Stub()`
 

@@ -7,12 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-26
+
 ### Added
 - `Account` JPA entity and the `V002__create_accounts_table.sql` Flyway migration, backing the
   in-progress accounts feature (`backend_spec_002_accounts.md`): required `bankName`/`accountName`
   (split so accounts can later be grouped by bank), `type` restricted to `CURRENT`/`SAVINGS`/
   `CASH_ISA`, a required owner, and `balance` seeded from `openingBalance` at construction
   (`BACKEND-002-AC-01` through `AC-06`).
+- `POST /api/accounts`: creates an account owned by the authenticated user, with the owner derived
+  solely from the JWT principal rather than any owner/user-id field in the request body
+  (`BACKEND-002-AC-07` through `AC-09`, `AC-11`). `type` is restricted to the allowed enum values
+  and `openedOn` to today or earlier via `@PastOrPresent` (`AC-10`, `AC-12`). Also adds a
+  `GlobalExceptionHandler` handler for `HttpMessageNotReadableException`, so a malformed request
+  body or an unrecognised `type` string returns `400` instead of falling through to the generic
+  `500` handler.
 
 ## [0.6.0] - 2026-10-23
 
