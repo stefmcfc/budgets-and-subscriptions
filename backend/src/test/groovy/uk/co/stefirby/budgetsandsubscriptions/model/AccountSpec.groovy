@@ -10,7 +10,8 @@ import spock.lang.Unroll
 import uk.co.stefirby.budgetsandsubscriptions.repository.AccountRepository
 import uk.co.stefirby.budgetsandsubscriptions.repository.UserRepository
 
-import static uk.co.stefirby.budgetsandsubscriptions.model.ModelConstants.*
+import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountConstants.*
+import static uk.co.stefirby.budgetsandsubscriptions.model.util.UserEntityHelper.createUser
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -23,16 +24,9 @@ class AccountSpec extends Specification {
     @Autowired
     UserRepository userRepository
 
-    private UUID createUser() {
-        User user = new User(USER_EMAIL_VALID, USER_PASSWORD, USER_DISPLAY_NAME)
-        userRepository.saveAndFlush(user)
-        Optional<User> newUser = userRepository.findByEmail(USER_EMAIL_VALID)
-        return newUser.get().id
-    }
-
     def "BACKEND-002-AC-01: rejects a null or blank bank name or account name"() {
         given: "a new Account with a null or blank bankName or accountName"
-            UUID userId = createUser()
+            UUID userId = createUser(userRepository)
 
             Account account = new Account(userId, bankName, accountName,
                 ACCOUNT_OPENED_ON, ACCOUNT_OPENING_BALANCE, AccountType.SAVINGS)
@@ -56,7 +50,7 @@ class AccountSpec extends Specification {
     @Unroll
     def "BACKEND-002-AC-02: allows two accounts with #scenario for the same owner"() {
         given: "a persisted account owned by a user with a given bankName and accountName"
-            UUID userId = createUser()
+            UUID userId = createUser(userRepository)
 
             Account account1 = new Account(userId, bankName1, accountName1,
                 ACCOUNT_OPENED_ON, ACCOUNT_OPENING_BALANCE, AccountType.SAVINGS)
@@ -80,7 +74,7 @@ class AccountSpec extends Specification {
 
     def "BACKEND-002-AC-03: accepts each of the three v1 account types"() {
         given: "a new Account for each of CURRENT, SAVINGS, and CASH_ISA"
-            UUID userId = createUser()
+            UUID userId = createUser(userRepository)
             Account account1 = new Account(userId, ACCOUNT_BANK_NAME, ACCOUNT_ACCOUNT_NAME,
                 ACCOUNT_OPENED_ON, ACCOUNT_OPENING_BALANCE, AccountType.CURRENT)
             Account account2 = new Account(userId, ACCOUNT_BANK_NAME, ACCOUNT_ACCOUNT_NAME,
@@ -115,7 +109,7 @@ class AccountSpec extends Specification {
 
     def "BACKEND-002-AC-05: seeds balance equal to opening balance at construction"() {
         given: "a given openingBalance value"
-            UUID userId = createUser()
+            UUID userId = createUser(userRepository)
             BigDecimal openingBalance = 5000.01
             Account account = new Account(userId, ACCOUNT_BANK_NAME, ACCOUNT_ACCOUNT_NAME,
                 ACCOUNT_OPENED_ON, openingBalance, AccountType.CURRENT)

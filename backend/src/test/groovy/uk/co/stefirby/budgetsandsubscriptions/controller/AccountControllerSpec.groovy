@@ -1,8 +1,65 @@
 package uk.co.stefirby.budgetsandsubscriptions.controller
 
-import spock.lang.Specification
+import jakarta.servlet.http.Cookie
 
+import java.time.Clock
+import java.time.LocalDate
+import org.spockframework.spring.SpringBean
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
+import org.springframework.context.annotation.Import
+import org.springframework.test.web.servlet.MockMvc
+import spock.lang.Shared
+import spock.lang.Specification
+import spock.lang.Unroll
+import tools.jackson.databind.ObjectMapper
+import uk.co.stefirby.budgetsandsubscriptions.dto.AccountCreateRequest
+import uk.co.stefirby.budgetsandsubscriptions.dto.AccountResponse
+import uk.co.stefirby.budgetsandsubscriptions.dto.JwtClaim
+import uk.co.stefirby.budgetsandsubscriptions.model.AccountType
+import uk.co.stefirby.budgetsandsubscriptions.security.JwtService
+import uk.co.stefirby.budgetsandsubscriptions.security.SecurityConfig
+import uk.co.stefirby.budgetsandsubscriptions.security.util.JwtHelper
+import uk.co.stefirby.budgetsandsubscriptions.service.AccountService
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import static uk.co.stefirby.budgetsandsubscriptions.common.Constants.COOKIE_ACCESS_TOKEN
+import static uk.co.stefirby.budgetsandsubscriptions.common.TestConstants.ROLE_USER
+import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountConstants.*
+
+@WebMvcTest(controllers = AccountController)
+@Import(SecurityConfig)
 class AccountControllerSpec extends Specification {
+
+    private static final String ENDPOINT_ACCOUNTS = "/api/accounts"
+
+    @Autowired
+    MockMvc mockMvc
+
+    @Autowired
+    ObjectMapper objectMapper
+
+    @SpringBean
+    AccountService mockAccountService = Mock()
+
+    @SpringBean
+    JwtService mockJwtService = Mock()
+
+    @Shared
+    JwtHelper jwtHelper = new JwtHelper()
+
+    static class AuthenticatedUser {
+        UUID id
+        String jwt
+    }
+
+    private AuthenticatedUser createAuthenticatedUser(JwtService mockJwtService) {
+        UUID authenticatedUuid = UUID.randomUUID()
+        String jwt = jwtHelper.buildJwt(authenticatedUuid.toString(), ROLE_USER)
+        mockJwtService.getClaim(jwt) >> new JwtClaim(authenticatedUuid.toString(), ROLE_USER)
+        return new AuthenticatedUser(id: authenticatedUuid, jwt: jwt)
+    }
 
     //---------------------------------
     // POST /api/accounts tests
@@ -10,62 +67,192 @@ class AccountControllerSpec extends Specification {
 
     def "BACKEND-002-AC-07: creates and returns a new account for the authenticated user"() {
         given: "an authenticated user and a valid account creation request"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+
+            AccountCreateRequest accountCreateRequest = new AccountCreateRequest(
+                ACCOUNT_BANK_NAME, ACCOUNT_ACCOUNT_NAME, AccountType.CURRENT, ACCOUNT_OPENING_BALANCE, ACCOUNT_OPENED_ON)
 
         when: "POST /api/accounts is requested"
+            def body = objectMapper.writeValueAsString(accountCreateRequest)
+            def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 201 Created with the created account"
-
-        and: "the created account's balance equals the given openingBalance"
+            result.andExpect(status().isCreated())
+            String responseJson = result.andReturn().getResponse().getContentAsString()
+            AccountResponse response = objectMapper.readValue(responseJson, AccountResponse)
 
         and: "the created account is owned by the authenticated user"
+            1 * mockAccountService.createAccount(user.id.toString(), accountCreateRequest) >> new AccountResponse(
+                user.id, ACCOUNT_BANK_NAME, ACCOUNT_ACCOUNT_NAME, AccountType.CURRENT,
+                ACCOUNT_OPENING_BALANCE, ACCOUNT_OPENED_ON, ACCOUNT_OPENING_BALANCE)
+
+        and: "the created account's balance equals the given openingBalance"
+            response.balance() == ACCOUNT_OPENING_BALANCE
     }
 
     def "BACKEND-002-AC-08: ignores a client-supplied owner id"() {
         given: "an authenticated user and a creation request body containing a different user's id as owner"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+
+            AccountCreateRequest accountCreateRequest = new AccountCreateRequest(
+                ACCOUNT_BANK_NAME, ACCOUNT_ACCOUNT_NAME, AccountType.CURRENT, ACCOUNT_OPENING_BALANCE, ACCOUNT_OPENED_ON)
 
         when: "POST /api/accounts is requested"
+            UUID differentUuid = UUID.randomUUID()
+            def payload = [
+                "bankName" : ACCOUNT_BANK_NAME,
+                "accountName" : ACCOUNT_ACCOUNT_NAME,
+                "type" : AccountType.CURRENT.name(),
+                "openingBalance" : ACCOUNT_OPENING_BALANCE,
+                "openedOn" : ACCOUNT_OPENED_ON,
+                "userId": differentUuid
+            ]
+            def body = objectMapper.writeValueAsString(payload)
+            def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the created account's owner is the authenticated user, not the id from the request body"
+            1 * mockAccountService.createAccount(user.id.toString(), accountCreateRequest)
     }
 
-    def "BACKEND-002-AC-09: rejects account creation with a blank or missing bank name or account name"() {
+    @Unroll
+    def "BACKEND-002-AC-09: rejects account creation with a #scenario"() {
         given: "a creation request with a blank or missing bankName or accountName"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            AccountCreateRequest accountCreateRequest = new AccountCreateRequest(
+                bankName, accountName, AccountType.CURRENT, ACCOUNT_OPENING_BALANCE, ACCOUNT_OPENED_ON)
 
         when: "POST /api/accounts is requested"
+            def body = objectMapper.writeValueAsString(accountCreateRequest)
+            def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
 
         and: "no account is created"
+            0 * mockAccountService.createAccount(user.id.toString(), _ as AccountCreateRequest)
+
+        where:
+            scenario             | bankName          | accountName
+            "null bank name"     | null              | ACCOUNT_ACCOUNT_NAME
+            "empty bank name"    | ""                | ACCOUNT_ACCOUNT_NAME
+            "blank bank name"    | "     "           | ACCOUNT_ACCOUNT_NAME
+            "null account name"  | ACCOUNT_BANK_NAME | null
+            "empty account name" | ACCOUNT_BANK_NAME | ""
+            "blank account name" | ACCOUNT_BANK_NAME | "     "
     }
 
-    def "BACKEND-002-AC-10: rejects account creation with a missing or invalid type"() {
+    @Unroll
+    def "BACKEND-002-AC-10: rejects account creation where account type is #scenario"() {
         given: "a creation request with either a missing type or a type value outside the allowed enum"
+            def payload = [
+                "bankName" : ACCOUNT_BANK_NAME,
+                "accountName" : ACCOUNT_ACCOUNT_NAME,
+                "type" : accountType,
+                "openingBalance" : ACCOUNT_OPENING_BALANCE,
+                "openedOn" : ACCOUNT_OPENED_ON
+            ]
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
 
         when: "POST /api/accounts is requested"
+            def body = objectMapper.writeValueAsString(payload)
+            def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
 
         and: "no account is created"
+            0 * mockAccountService.createAccount(user.id.toString(), _ as AccountCreateRequest)
+
+        where:
+            scenario  | accountType
+            "null"    | null
+            "empty"   | ""
+            "blank"   | "     "
+            "unknown" | "UNKNOWN"
     }
 
     def "BACKEND-002-AC-11: rejects account creation with a missing opening balance"() {
         given: "a creation request with a missing openingBalance"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+
+            AccountCreateRequest accountCreateRequest = new AccountCreateRequest(
+                ACCOUNT_BANK_NAME, ACCOUNT_ACCOUNT_NAME, AccountType.CURRENT, null, ACCOUNT_OPENED_ON)
 
         when: "POST /api/accounts is requested"
+            def body = objectMapper.writeValueAsString(accountCreateRequest)
+            def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
 
         and: "no account is created"
+            0 * mockAccountService.createAccount(user.id.toString(), _ as AccountCreateRequest)
     }
 
-    def "BACKEND-002-AC-12: rejects account creation with a missing or future-dated openedOn"() {
+    @Unroll
+    def "BACKEND-002-AC-12: rejects account creation with a #scenario openedOn"() {
         given: "a creation request with either a missing openedOn or an openedOn after today"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+
+            AccountCreateRequest accountCreateRequest = new AccountCreateRequest(
+                ACCOUNT_BANK_NAME, ACCOUNT_ACCOUNT_NAME, AccountType.CURRENT, ACCOUNT_OPENING_BALANCE, openedOn)
 
         when: "POST /api/accounts is requested"
+            def body = objectMapper.writeValueAsString(accountCreateRequest)
+            def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
 
         and: "no account is created"
+            0 * mockAccountService.createAccount(user.id.toString(), _ as AccountCreateRequest)
+
+        where:
+            scenario       | openedOn
+            "missing"      | null
+            "future-dated" | LocalDate.of(2099, 12, 31)
+    }
+
+    @Unroll
+    def "BACKEND-002-AC-12: accepts account creation with an openedOn date set #scenario"() {
+        given: "a creation request with openedOn in the past or today"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+
+            AccountCreateRequest accountCreateRequest = new AccountCreateRequest(
+                ACCOUNT_BANK_NAME, ACCOUNT_ACCOUNT_NAME, AccountType.CURRENT, ACCOUNT_OPENING_BALANCE, openedOn)
+
+        when: "POST /api/accounts is requested"
+            def body = objectMapper.writeValueAsString(accountCreateRequest)
+            def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
+
+        then: "the response is 201 Created"
+            result.andExpect(status().isCreated())
+
+        where:
+            scenario      | openedOn
+            "in the past" | LocalDate.of(2020, 01, 01)
+            "on today"    | LocalDate.now(Clock.systemDefaultZone())
     }
 
     //---------------------------------

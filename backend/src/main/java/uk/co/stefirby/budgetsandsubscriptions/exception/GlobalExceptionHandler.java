@@ -4,11 +4,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import tools.jackson.databind.exc.InvalidFormatException;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -16,6 +19,7 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private static final String VALIDATION_ERRORS = "Validation Errors";
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiError> handleMethodArgumentNotValidException(MethodArgumentNotValidException ex) {
@@ -27,7 +31,33 @@ public class GlobalExceptionHandler {
                                 Collectors.mapping(FieldError::getDefaultMessage, Collectors.toList())
                         ));
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(ApiError.of("Validation Errors", errors));
+                .body(ApiError.of(VALIDATION_ERRORS, errors));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiError> handleHttpMessageNotReadableException(HttpMessageNotReadableException ex) {
+        LOG.warn("HttpMessageNotReadableException", ex);
+        ApiError apiError;
+        if (ex.getCause() instanceof InvalidFormatException ife) {
+            String value = ife.getValue().toString();
+            String propertyName = ife.getPath().getLast().getPropertyName();
+            String errorMessage;
+            if (ife.getTargetType().isEnum()) {
+                String validValues = Arrays.stream(ife.getTargetType()
+                    .getEnumConstants())
+                    .map(Object::toString)
+                    .collect(Collectors.joining(", "));
+                errorMessage = String.format("[%s] is not valid. Must be one of %s", value, validValues);
+            } else {
+                String targetType = ife.getTargetType().getSimpleName();
+                errorMessage = String.format("[%s] is not a valid %s", value, targetType);
+            }
+            apiError = ApiError.of(VALIDATION_ERRORS, Map.of(propertyName, errorMessage));
+        } else {
+            apiError = ApiError.of(VALIDATION_ERRORS);
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(apiError);
     }
 
     @ExceptionHandler(DuplicateEmailException.class)

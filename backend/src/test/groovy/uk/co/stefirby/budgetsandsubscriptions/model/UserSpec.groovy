@@ -10,7 +10,7 @@ import spock.lang.Specification
 import spock.lang.Unroll
 import uk.co.stefirby.budgetsandsubscriptions.repository.UserRepository
 
-import static uk.co.stefirby.budgetsandsubscriptions.model.ModelConstants.*
+import static uk.co.stefirby.budgetsandsubscriptions.model.util.UserConstants.*
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)

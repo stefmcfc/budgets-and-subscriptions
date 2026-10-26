@@ -1,13 +1,8 @@
-package uk.co.stefirby.budgetsandsubscriptions.model
+package uk.co.stefirby.budgetsandsubscriptions.model.util
 
 import java.time.LocalDate
 
-class ModelConstants {
-
-    public static final String USER_EMAIL_VALID = "test@test.com"
-    public static final String USER_EMAIL_UPPERCASE = "TEST@TEST.COM"
-    public static final String USER_PASSWORD = "dummyPassword"
-    public static final String USER_DISPLAY_NAME = "Test"
+class AccountConstants {
 
     public static String ACCOUNT_BANK_NAME = "Bank Of Ste"
     public static String ACCOUNT_BANK_NAME_1 = "Ste's Saving Bank"
