@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-27
+
+### Added
+- `GET /api/accounts`: returns only the authenticated user's own accounts, and an empty list when
+  they have none (`BACKEND-002-AC-13`, `AC-14`).
+- `GET /api/accounts/{id}`: returns an owned account, `200`. A non-existent or non-owned account id
+  responds `404` identically in both cases, so a caller can't tell "doesn't exist" apart from
+  "isn't yours" (`AC-15`, `AC-16`). A supplied-but-invalid (non-UUID) id responds `400` via a new
+  `GlobalExceptionHandler` mapping for `MethodArgumentTypeMismatchException`; an absent (empty or
+  blank) id responds `404` via new mappings for `NoResourceFoundException` and
+  `MissingPathVariableException` (`AC-24a`, `AC-24b`).
+
 ## [0.7.0] - 2026-10-26
 
 ### Added
