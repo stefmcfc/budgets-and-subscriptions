@@ -7,6 +7,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import uk.co.stefirby.budgetsandsubscriptions.dto.AccountCreateRequest;
 import uk.co.stefirby.budgetsandsubscriptions.dto.AccountResponse;
+import uk.co.stefirby.budgetsandsubscriptions.dto.AccountUpdateRequest;
 import uk.co.stefirby.budgetsandsubscriptions.service.AccountService;
 
 import java.util.List;
@@ -40,6 +41,14 @@ public class AccountController {
     public ResponseEntity<AccountResponse> getAccount(@PathVariable("accountId") UUID accountId,
                                                       @AuthenticationPrincipal String userId) {
         AccountResponse response = accountService.getAccount(userId, accountId);
+        return ResponseEntity.ok(response);
+    }
+
+    @PatchMapping("/{accountId}")
+    public ResponseEntity<AccountResponse> updateAccount(@PathVariable("accountId") UUID accountId,
+                                                         @Valid @RequestBody AccountUpdateRequest requestBody,
+                                                         @AuthenticationPrincipal String userId) {
+        AccountResponse response = accountService.updateAccount(userId, accountId, requestBody);
         return ResponseEntity.ok(response);
     }
 

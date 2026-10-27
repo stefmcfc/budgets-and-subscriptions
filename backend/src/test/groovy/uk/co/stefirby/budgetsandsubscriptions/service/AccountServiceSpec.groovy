@@ -2,8 +2,10 @@ package uk.co.stefirby.budgetsandsubscriptions.service
 
 import spock.lang.Specification
 import spock.lang.Subject
+import spock.lang.Unroll
 import uk.co.stefirby.budgetsandsubscriptions.dto.AccountCreateRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.AccountResponse
+import uk.co.stefirby.budgetsandsubscriptions.dto.AccountUpdateRequest
 import uk.co.stefirby.budgetsandsubscriptions.model.Account
 import uk.co.stefirby.budgetsandsubscriptions.model.AccountType
 import uk.co.stefirby.budgetsandsubscriptions.repository.AccountRepository
@@ -116,11 +118,40 @@ class AccountServiceSpec extends Specification {
             UUID accountId = UUID.randomUUID()
             mockAccountRepository.findByIdAndUserId(accountId, userId) >> Optional.of(buildAccount1(userId))
 
-        when: "GET /api/accounts/{id} is requested with that account's id"
+        when: "getAccounts is called for that user and account id"
             AccountResponse response = accountService.getAccount(userId.toString(), accountId)
 
-        then: "response is sent"
+        then: "response is returned"
             response.accountName() == ACCOUNT_ACCOUNT_NAME
     }
 
+    @Unroll
+    def "BACKEND-002-AC-17: updates an owned account's bank name, account name, or type - #scenario"() {
+        given: "valid user with uuid format who has an account"
+            UUID userId = UUID.randomUUID()
+            UUID accountId = UUID.randomUUID()
+
+        and: "a valid AccountUpdateRequest is provided"
+            AccountUpdateRequest accountUpdateRequest = new AccountUpdateRequest(
+                newBankName, newAccountName, newAccountType)
+
+        when: "updateAccount is called is for the account"
+            AccountResponse response = accountService.updateAccount(userId.toString(), accountId, accountUpdateRequest)
+
+        then: "find and update account performed on repository"
+            1 * mockAccountRepository.findByIdAndUserId(accountId, userId) >> Optional.of(buildAccount1(userId))
+            1 * mockAccountRepository.saveAndFlush(_ as Account) >> { Account a -> a }
+
+        and: "response is returned with updated fields for those in the request and unchanged for the others"
+            newBankName != null ? response.bankName() == newBankName : response.bankName() == ACCOUNT_BANK_NAME
+            newAccountName != null ? response.accountName() == newAccountName : response.accountName() == ACCOUNT_ACCOUNT_NAME
+            newAccountType != null ? response.type() == newAccountType : response.type() == AccountType.CURRENT
+
+        where:
+            scenario           | newBankName     | newAccountName     | newAccountType
+            "bankName only"    | "New Bank Name" | null               | null
+            "accountName only" | null            | "New Account Name" | null
+            "accountType only" | null            | null               | AccountType.CASH_ISA
+            "all 3 fields"     | "New Bank Name" | "New Account Name" | AccountType.CASH_ISA
+    }
 }
