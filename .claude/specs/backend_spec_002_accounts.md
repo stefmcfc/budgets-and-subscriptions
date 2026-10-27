@@ -1,6 +1,6 @@
 # Accounts (Backend)
 
-**Status**: In progress (AC-01 through AC-12 done, 2026-10-26)
+**Status**: In progress (AC-01 through AC-16, AC-24a, AC-24b done, 2026-10-27)
 **Priority**: P1 — first spec of build order step 2 ("Accounts and transactions"); every
 account-scoped feature (transactions, spending insights, multi-person balances) depends on an
 `Account` existing to attach to.
@@ -176,6 +176,40 @@ cases.
 **Rationale**: Mirrors `AUTH-001-AC-11`'s uniform-failure principle — a distinct response for
 "doesn't exist" vs. "exists but isn't yours" would leak which account ids belong to other users.
 
+#### BACKEND-002-AC-24a [AUTO]: A supplied-but-invalid id is a 400, not a 404 or 500
+**Statement**: If `GET /api/accounts/{id}` is requested with an `id` path segment that is present
+but not a valid UUID, then the `AccountController` shall respond `400 Bad Request`.
+
+**Rationale**: Distinct failure mode from `BACKEND-002-AC-16` — an unconvertible id never reaches
+the owned/not-owned lookup at all; `@PathVariable UUID` conversion fails before the controller
+method runs. That's a client-input problem (`400`), not "doesn't exist" (`404`) or a server fault
+(`500`). Requires a `GlobalExceptionHandler` mapping for `MethodArgumentTypeMismatchException`,
+mirroring the existing `HttpMessageNotReadableException` → `400` precedent (`BACKEND-002-AC-10`'s
+rationale) for the same "framework conversion failure, not business logic" category of error.
+Covers any non-empty, non-UUID-shaped string — including the literal string `"null"` — since
+Boot's `StringToUuidConverter` throws `IllegalArgumentException` identically for all of them; it
+does not cover a genuinely absent id (`BACKEND-002-AC-24b`).
+
+#### BACKEND-002-AC-24b [AUTO]: An absent id is a 404, not a 400 or 500
+**Statement**: If `GET /api/accounts/{id}` is requested with an `id` path segment that is empty or
+blank, then the `AccountController` shall respond `404 Not Found`.
+
+**Rationale**: An empty or whitespace-only segment isn't a malformed attempt at an id — it's the
+absence of one, which reads to a client the same as any other route that doesn't exist. Practically,
+a browser (or most HTTP clients building a URL from user input) trims leading/trailing whitespace
+before the request goes out, so a blank segment and an empty one collapse to the same real-world
+case rather than representing a genuinely distinct input. Mechanically, an empty segment never
+matches `/api/accounts/{id}` at all (trailing-slash matching is off by default since Spring
+Framework 6.1/Boot 3.2) and falls through to static-resource resolution, throwing
+`NoResourceFoundException` — which already `extends ResponseStatusException(NOT_FOUND)`. A blank
+segment does match the route, but Boot's `StringToUuidConverter` special-cases blank/empty input by
+returning `null` instead of throwing, which trips Spring's own "required path variable converted to
+null" check, throwing `MissingPathVariableException`. Both need a `GlobalExceptionHandler` mapping
+to `404` — `NoResourceFoundException` so the existing catch-all `@ExceptionHandler(Exception.class)`
+doesn't shadow Spring's own built-in `404` for it; `MissingPathVariableException` so its default
+would-be `500` becomes `404` instead. A single handler covering both exception types, mapped to
+`404`, satisfies this AC.
+
 ### Requirement 5: Update an account
 
 **User story**: As a user, I want to rename an account or correct its type after creation,
@@ -259,7 +293,7 @@ AC exists as a tested regression guard for that default, not to introduce new fi
 | `POST /api/accounts`, `GET /api/accounts`, `GET /api/accounts/{id}`, `PATCH /api/accounts/{id}`, `DELETE /api/accounts/{id}`    | This spec                                                            | `frontend_spec_002_accounts.md` (future)                                                                                                                                    |
 | Owner-scoping via `@AuthenticationPrincipal String userId` / `JwtAuthenticationFilter`                                          | `backend_spec_001_basic_login.md` (`AUTH-001-AC-20` through `AC-23`) | This spec (every endpoint)                                                                                                                                                  |
 | `User` entity (owner FK target)                                                                                                 | `backend_spec_001_basic_login.md` (`AUTH-001-AC-01` through `AC-04`) | This spec                                                                                                                                                                   |
-| `GlobalExceptionHandler` / custom-exception pattern (`DuplicateEmailException`, `LoginException`, `UserException` as precedent) | `backend_spec_001_basic_login.md`                                    | This spec (adds an account-not-found exception mapped to `404`, and needs an `HttpMessageNotReadableException` handler mapped to `400` per `BACKEND-002-AC-10`'s rationale) |
+| `GlobalExceptionHandler` / custom-exception pattern (`DuplicateEmailException`, `LoginException`, `UserException` as precedent) | `backend_spec_001_basic_login.md`                                    | This spec (adds an account-not-found exception mapped to `404`, an `HttpMessageNotReadableException` handler mapped to `400` per `BACKEND-002-AC-10`'s rationale, a `MethodArgumentTypeMismatchException` handler mapped to `400` per `BACKEND-002-AC-24a`'s rationale, and a combined `NoResourceFoundException`/`MissingPathVariableException` handler mapped to `404` per `BACKEND-002-AC-24b`'s rationale) |
 | Account types/fields/running-balance decisions                                                                                  | `.claude/02-accounts-and-transactions/design-decisions.md`           | This spec                                                                                                                                                                   |
 | Deferred account concepts (credit cards, investment/pension/Stocks & Shares ISA, encrypted sort-code/account-number, archiving) | `.claude/02-accounts-and-transactions/spec_candidates.md`            | N/A — confirms these aren't part of this spec                                                                                                                               |
 
@@ -277,10 +311,10 @@ AC exists as a tested regression guard for that default, not to introduce new fi
 - [x] BACKEND-002-AC-10 [AUTO]: Missing/invalid `type` on create returns 400, no account created
 - [x] BACKEND-002-AC-11 [AUTO]: Missing `openingBalance` on create returns 400, no account created
 - [x] BACKEND-002-AC-12 [AUTO]: Missing or future `openedOn` on create returns 400, no account created
-- [ ] BACKEND-002-AC-13 [AUTO]: `GET /api/accounts` returns only the authenticated user's own accounts
-- [ ] BACKEND-002-AC-14 [AUTO]: `GET /api/accounts` returns an empty list when the user has no accounts
-- [ ] BACKEND-002-AC-15 [AUTO]: `GET /api/accounts/{id}` returns an owned account, 200
-- [ ] BACKEND-002-AC-16 [AUTO]: `GET /api/accounts/{id}` returns 404 uniformly for not-found and not-owned
+- [x] BACKEND-002-AC-13 [AUTO]: `GET /api/accounts` returns only the authenticated user's own accounts
+- [x] BACKEND-002-AC-14 [AUTO]: `GET /api/accounts` returns an empty list when the user has no accounts
+- [x] BACKEND-002-AC-15 [AUTO]: `GET /api/accounts/{id}` returns an owned account, 200
+- [x] BACKEND-002-AC-16 [AUTO]: `GET /api/accounts/{id}` returns 404 uniformly for not-found and not-owned
 - [ ] BACKEND-002-AC-17 [AUTO]: Valid `PATCH /api/accounts/{id}` updates bank name/account name/type, returns 200
 - [ ] BACKEND-002-AC-18 [AUTO]: `PATCH /api/accounts/{id}` returns 404 uniformly for not-found and not-owned
 - [ ] BACKEND-002-AC-19 [AUTO]: Blank `bankName` or `accountName` on update returns 400, no modification
@@ -288,6 +322,8 @@ AC exists as a tested regression guard for that default, not to introduce new fi
 - [ ] BACKEND-002-AC-21 [AUTO]: `DELETE /api/accounts/{id}` deletes an owned account, 204
 - [ ] BACKEND-002-AC-22 [AUTO]: `DELETE /api/accounts/{id}` returns 404 uniformly for not-found and not-owned
 - [ ] BACKEND-002-AC-23 [AUTO]: Unauthenticated requests to any `/api/accounts` route are rejected 401 before the controller runs
+- [x] BACKEND-002-AC-24a [AUTO]: `GET /api/accounts/{id}` with a supplied-but-invalid (non-UUID) id returns 400, not 404 or 500
+- [x] BACKEND-002-AC-24b [AUTO]: `GET /api/accounts/{id}` with an absent (empty/blank) id returns 404, not 400 or 500
 
 ## Test case sketches
 
@@ -463,6 +499,26 @@ def "BACKEND-002-AC-16: returns 404 uniformly for a non-existent or non-owned ac
     when: "GET /api/accounts/{id} is requested with that id"
 
     then: "the response is 404 Not Found in both cases"
+}
+```
+
+```groovy
+def "BACKEND-002-AC-24a: returns 400 for a supplied-but-invalid (non-UUID) id"() {
+    given: "an authenticated user"
+
+    when: "GET /api/accounts/{id} is requested with an id that is the string \"null\" or not a UUID"
+
+    then: "the response is 400 Bad Request"
+}
+```
+
+```groovy
+def "BACKEND-002-AC-24b: returns 404 for an absent (empty or blank) id"() {
+    given: "an authenticated user"
+
+    when: "GET /api/accounts/{id} is requested with an id that is empty or blank"
+
+    then: "the response is 404 Not Found"
 }
 ```
 

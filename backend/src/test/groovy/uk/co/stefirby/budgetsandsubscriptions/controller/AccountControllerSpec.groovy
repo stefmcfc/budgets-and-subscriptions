@@ -1,6 +1,7 @@
 package uk.co.stefirby.budgetsandsubscriptions.controller
 
 import jakarta.servlet.http.Cookie
+import uk.co.stefirby.budgetsandsubscriptions.exception.AccountNotFoundException
 
 import java.time.Clock
 import java.time.LocalDate
@@ -22,6 +23,7 @@ import uk.co.stefirby.budgetsandsubscriptions.security.SecurityConfig
 import uk.co.stefirby.budgetsandsubscriptions.security.util.JwtHelper
 import uk.co.stefirby.budgetsandsubscriptions.service.AccountService
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import static uk.co.stefirby.budgetsandsubscriptions.common.Constants.COOKIE_ACCESS_TOKEN
@@ -33,6 +35,11 @@ import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountConstants
 class AccountControllerSpec extends Specification {
 
     private static final String ENDPOINT_ACCOUNTS = "/api/accounts"
+
+    private static AccountResponse ACCOUNT_RESPONSE_1 = new AccountResponse(UUID.randomUUID(), ACCOUNT_BANK_NAME,
+        ACCOUNT_ACCOUNT_NAME, AccountType.CURRENT, ACCOUNT_OPENING_BALANCE, ACCOUNT_OPENED_ON, ACCOUNT_OPENING_BALANCE)
+    private static AccountResponse ACCOUNT_RESPONSE_2 = new AccountResponse(UUID.randomUUID(), ACCOUNT_BANK_NAME_1,
+        ACCOUNT_ACCOUNT_NAME_1, AccountType.SAVINGS, ACCOUNT_OPENING_BALANCE_1, ACCOUNT_OPENED_ON_1, ACCOUNT_OPENING_BALANCE_1)
 
     @Autowired
     MockMvc mockMvc
@@ -85,9 +92,7 @@ class AccountControllerSpec extends Specification {
             AccountResponse response = objectMapper.readValue(responseJson, AccountResponse)
 
         and: "the created account is owned by the authenticated user"
-            1 * mockAccountService.createAccount(user.id.toString(), accountCreateRequest) >> new AccountResponse(
-                user.id, ACCOUNT_BANK_NAME, ACCOUNT_ACCOUNT_NAME, AccountType.CURRENT,
-                ACCOUNT_OPENING_BALANCE, ACCOUNT_OPENED_ON, ACCOUNT_OPENING_BALANCE)
+            1 * mockAccountService.createAccount(user.id.toString(), accountCreateRequest) >> ACCOUNT_RESPONSE_1
 
         and: "the created account's balance equals the given openingBalance"
             response.balance() == ACCOUNT_OPENING_BALANCE
@@ -259,20 +264,47 @@ class AccountControllerSpec extends Specification {
     // GET /api/accounts tests
     //=================================
 
-    def "BACKEND-002-AC-13: lists only the authenticated user's own accounts"() {
-        given: "two users, each owning at least one account"
+    def "BACKEND-002-AC-13 / BACKEND-002-AC-14: lists only the authenticated user's own accounts"() {
+        given: "authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
 
-        when: "GET /api/accounts is requested by the first user"
+        when: "GET /api/accounts is requested"
+            def result = mockMvc.perform(get(ENDPOINT_ACCOUNTS)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json"))
 
-        then: "the response is 200 OK containing only the first user's accounts"
+        then: "the response is 200 OK"
+            result.andExpect(status().isOk())
+
+        and: "the service got called with the authenticated user"
+            1 * mockAccountService.getAccounts(user.id.toString()) >> List.of(ACCOUNT_RESPONSE_1, ACCOUNT_RESPONSE_2)
+
+        and: "two accounts found"
+            String responseJson = result.andReturn().getResponse().getContentAsString()
+            List<AccountResponse> response = objectMapper.readValue(responseJson, AccountResponse[].class).toList()
+            response.size() == 2
     }
 
     def "BACKEND-002-AC-14: returns an empty list for a user with no accounts"() {
-        given: "an authenticated user who owns no accounts"
+        given: "authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
 
         when: "GET /api/accounts is requested"
+            def result = mockMvc.perform(get(ENDPOINT_ACCOUNTS)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json"))
 
-        then: "the response is 200 OK with an empty list"
+        then: "the response is 200 OK"
+            result.andExpect(status().isOk())
+
+        and: "the service got called with the authenticated user"
+            1 * mockAccountService.getAccounts(user.id.toString()) >> List.of()
+
+        and: "no accounts found"
+            String responseJson = result.andReturn().getResponse().getContentAsString()
+            List<AccountResponse> response = objectMapper.readValue(responseJson, AccountResponse[].class).toList()
+            response.size() == 0
+
     }
 
     //---------------------------------
@@ -281,18 +313,75 @@ class AccountControllerSpec extends Specification {
 
     def "BACKEND-002-AC-15: returns a single owned account"() {
         given: "an account owned by the authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
 
         when: "GET /api/accounts/{id} is requested with that account's id"
+            def result = mockMvc.perform(get(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json"))
 
         then: "the response is 200 OK with that account"
+            result.andExpect(status().isOk())
+
+        and: "the service got called with the authenticated user"
+            1 * mockAccountService.getAccount(user.id.toString(), accountId) >> ACCOUNT_RESPONSE_1
     }
 
     def "BACKEND-002-AC-16: returns 404 uniformly for a non-existent or non-owned account"() {
         given: "either a non-existent account id, or an account id owned by a different user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
 
         when: "GET /api/accounts/{id} is requested with that id"
+            def result = mockMvc.perform(get(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json"))
 
         then: "the response is 404 Not Found in both cases"
+            result.andExpect(status().isNotFound())
+
+        and: "the service got called with the authenticated user"
+            1 * mockAccountService.getAccount(user.id.toString(), accountId) >>
+                { throw new AccountNotFoundException("Account not found") }
+    }
+
+    @Unroll
+    def "BACKEND-002-AC-24a: returns 400 for a malformed (#scenario) id"() {
+        given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+
+        when: "GET /api/accounts/{id} is requested with an id that is null, empty, blank, or not a UUID"
+            def result = mockMvc.perform(get(ENDPOINT_ACCOUNTS + "/" + accountId)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json"))
+
+        then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
+
+        where:
+            scenario   | accountId
+            "null"     | null
+            "non-uuid" | "not a uuid"
+    }
+
+    @Unroll
+    def "BACKEND-002-AC-24b: returns 404 for an absent (#scenario) id"() {
+        given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+
+        when: "GET /api/accounts/{id} is requested with an id that is empty or blank"
+            def result = mockMvc.perform(get(ENDPOINT_ACCOUNTS + "/" + accountId)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json"))
+
+        then: "the response is 404 Not Found"
+            result.andExpect(status().isNotFound())
+
+        where:
+            scenario     | accountId
+            "empty"      | ""
+            "blank"      | "     "
     }
 
     //---------------------------------

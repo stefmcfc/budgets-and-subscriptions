@@ -9,9 +9,13 @@ class UserEntityHelper {
 
     static UUID createUser(UserRepository userRepository) {
         User user = new User(USER_EMAIL_VALID, USER_PASSWORD, USER_DISPLAY_NAME)
-        userRepository.saveAndFlush(user)
-        Optional<User> newUser = userRepository.findByEmail(USER_EMAIL_VALID)
-        return newUser.get().id
+        User createdUser = userRepository.saveAndFlush(user)
+        return createdUser.id
     }
 
+    static UUID createUser2(UserRepository userRepository) {
+        User user = new User(USER_EMAIL_VALID_1, USER_PASSWORD, USER_DISPLAY_NAME)
+        User createdUser = userRepository.saveAndFlush(user)
+        return createdUser.id
+    }
 }

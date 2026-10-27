@@ -4,13 +4,13 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import uk.co.stefirby.budgetsandsubscriptions.dto.AccountCreateRequest;
 import uk.co.stefirby.budgetsandsubscriptions.dto.AccountResponse;
 import uk.co.stefirby.budgetsandsubscriptions.service.AccountService;
+
+import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/accounts")
@@ -28,6 +28,19 @@ public class AccountController {
         AccountResponse response = accountService.createAccount(userId, requestBody);
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(response);
+    }
+
+    @GetMapping
+    public ResponseEntity<List<AccountResponse>> getAllAccounts(@AuthenticationPrincipal String userId) {
+        List<AccountResponse> accounts = accountService.getAccounts(userId);
+        return ResponseEntity.ok(accounts);
+    }
+
+    @GetMapping("/{accountId}")
+    public ResponseEntity<AccountResponse> getAccount(@PathVariable("accountId") UUID accountId,
+                                                      @AuthenticationPrincipal String userId) {
+        AccountResponse response = accountService.getAccount(userId, accountId);
+        return ResponseEntity.ok(response);
     }
 
 }

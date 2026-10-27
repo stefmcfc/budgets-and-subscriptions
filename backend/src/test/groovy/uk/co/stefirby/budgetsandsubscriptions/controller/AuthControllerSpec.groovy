@@ -399,6 +399,10 @@ class AuthControllerSpec extends Specification {
             "expired cookie"   | "expired cookie" | "expired token"
     }
 
+    //---------------------------------
+    // /api/auth/logout tests
+    //=================================
+
     def "AUTH-001-AC-16: logout clears the access-token cookie"() {
         when: "POST /api/auth/logout is requested"
             def result = mockMvc.perform(post(ENDPOINT_LOGOUT))

@@ -9,6 +9,8 @@ class AccountConstants {
     public static String ACCOUNT_ACCOUNT_NAME = "Super Savings Account"
     public static String ACCOUNT_ACCOUNT_NAME_1 = "Huge Savings"
     public static LocalDate ACCOUNT_OPENED_ON = LocalDate.of(2026, 1, 1)
+    public static LocalDate ACCOUNT_OPENED_ON_1 = LocalDate.of(2026, 2, 1)
     public static BigDecimal ACCOUNT_OPENING_BALANCE = 1234.56
+    public static BigDecimal ACCOUNT_OPENING_BALANCE_1 = 987.65
 
 }

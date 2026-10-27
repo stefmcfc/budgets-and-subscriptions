@@ -181,6 +181,93 @@ request as a raw `Map` serialized through the already-autowired `ObjectMapper`
 the same technique `AC-08`'s client-supplied-owner-id test needed, for the same underlying reason:
 the attack surface here is the wire format, not anything the compiler can help construct.
 
+## Declaring a `@PathVariable` as its target type (not `String`) pushes format validation into the framework, for free
+
+**Context**: deciding how to implement `GET /api/accounts/{id}` (`BACKEND-002-AC-15`/`AC-16`) —
+whether `accountId` should be a `@PathVariable String`, parsed and validated by hand, or a
+`@PathVariable UUID` directly. A regex-constrained `@GetMapping` path pattern (`{id:[0-9a-fA-F]{8}-...}`)
+was considered first, as a way to reject a malformed id before the controller even runs.
+
+**Why plain `UUID` beats both alternatives**: Spring's `PathVariableMethodArgumentResolver` already
+has a `ConversionService` entry for `String → UUID` (the same general mechanism behind `String →
+LocalDate`/`String → Enum` elsewhere in request binding). Declaring the parameter as `UUID` means
+Spring converts the path segment before the controller method body runs at all, and raises
+`MethodArgumentTypeMismatchException` on failure — handleable centrally in `GlobalExceptionHandler`,
+the same single error-handling path every other input-shape failure already goes through
+(`MethodArgumentNotValidException` for body validation, `HttpMessageNotReadableException` for an
+unparseable enum in the body, both above). The regex-path-pattern alternative fails differently: a
+non-matching id never reaches this `@GetMapping` at all, falling through to Spring's own "no handler
+found" handling instead — a *second*, less-controlled error path with a different response shape
+than the rest of the app's `ApiError` contract, for no real benefit over the typed parameter. A
+`String` parameter with hand-rolled parsing/regex duplicates what the framework's converter already
+does, puts validation logic inside the controller (against this project's thin-controller
+convention), and risks getting the regex itself subtly wrong.
+
+**Fix / general tell**: for any path or request parameter with an obvious target type (`UUID`,
+`LocalDate`, an enum, a number), declare the parameter as that type and let the conversion failure
+flow into `GlobalExceptionHandler` — reach for `String` + manual parsing, or a route-level regex
+constraint, only when there's validation logic beyond "is this the right shape" that the built-in
+converter genuinely can't express.
+
+## A `@PathVariable UUID` conversion failure isn't one exception — it's three, and only one of them should be a 400
+
+**Context**: `BACKEND-002-AC-24a`/`AC-24b` — testing `GET /api/accounts/{id}` with a non-UUID,
+empty, and blank `accountId` path segment all looked like the same "malformed id" case at first,
+all expected to funnel into the `MethodArgumentTypeMismatchException` handler the previous entry
+set up. Only the genuinely-present-but-unconvertible string actually does.
+
+**Why there are three different exceptions, not one**:
+- **A present, non-UUID-shaped string** (`"not a uuid"`, or the literal text `"null"` — see the
+  next entry for why that's the text you actually get) — the path segment matches the route, Boot's
+  `StringToUuidConverter` calls `UUID.fromString(...)` on it, which throws `IllegalArgumentException`,
+  surfacing as `MethodArgumentTypeMismatchException`. This is the one genuinely "malformed input"
+  case — `400` is correct.
+- **A genuinely empty segment** (`/api/accounts/` — trailing slash, nothing after it) — doesn't even
+  match `/api/accounts/{id}` at all. Trailing-slash matching has been off by default since Spring
+  Framework 6.1/Boot 3.2, so this falls through to static-resource resolution instead, which throws
+  `NoResourceFoundException` when nothing matches there either.
+- **A blank segment** (whitespace only) — *does* match the route (it's a non-empty string of
+  spaces), but `StringToUuidConverter` special-cases blank/empty input by returning `null` instead
+  of throwing. Spring then runs its own "a required path variable resolved to null" check and throws
+  `MissingPathVariableException` — a completely different resolution path from the type-mismatch
+  one above, despite both ultimately stemming from "the converter didn't like this input."
+
+**Why this matters beyond just picking the right `@ExceptionHandler`**: `NoResourceFoundException`
+already `extends ResponseStatusException` with `404` built in — if this project's own blanket
+`@ExceptionHandler(Exception.class)` catch-all weren't present, Spring would already respond `404`
+to the empty-segment case for free. The catch-all intercepts it first (it's still an `Exception`,
+and there's no more-specific handler registered for it), silently downgrading a correct built-in
+`404` into a generic `500`. General tell: a blanket `Exception`-class handler doesn't just risk
+masking real bugs as `500`s (per the earlier `DataAccessException` entry) — it can also shadow a
+framework-provided `ResponseStatusException` that already knew its own correct status, for any
+exception type that extends it and has no explicit handler of its own.
+
+**Takeaway**: "the id is malformed" actually splits into two distinct categories with different
+correct responses — *something was supplied but doesn't convert* (`400`) vs. *nothing meaningful was
+supplied at all* (`404`, because absence reads the same as a route that doesn't exist) — and they
+arrive via three different exception types, not one.
+
+## Groovy's `null` in string concatenation becomes the literal text `"null"` — there's no way to send an actual null in a URL path
+
+**Context**: a `where:` table row for `BACKEND-002-AC-24a` used Groovy's `null` literal as the
+`accountId` value, built into the request via `get(ENDPOINT_ACCOUNTS + "/" + accountId)`, intending
+to test "no id supplied." The resulting exception read `Invalid UUID string: null` — i.e. the server
+received the four-character text `null`, not an absence of input.
+
+**Why**: Groovy's `String + null` resolves to `StringGroovyMethods.plus(String, Object)`, which
+calls `String.valueOf(null)` and concatenates that — exactly Java's own behavior for string
+concatenation with `null`. The request is built as plain text before it's ever sent, so by the time
+it leaves the test, `"/api/accounts/" + null` is indistinguishable from `"/api/accounts/" + "null"`
+typed as a literal. This isn't specific to Groovy or MockMvc either — a URL path segment is always a
+string on the wire; there is no HTTP-level representation of "a null value" in a path, only *some*
+string value or *no segment at all* (an actually empty/trailing-slash path, a genuinely different
+case — see the previous entry).
+
+**Takeaway**: when a `where:` table's `null` is meant to represent "no id in the path," check what
+it actually becomes once it's concatenated into a URL — it almost certainly isn't absence, it's the
+text `"null"`, and will exercise whichever code path handles *that* string, not whichever path (if
+any) handles a missing segment.
+
 ## `Stream.toString()` doesn't describe its elements — collect it before putting it in a response
 
 **Context**: `GlobalExceptionHandler.handleMethodArgumentNotValidException` built its error message
@@ -939,6 +1026,57 @@ client-facing outcome* — `DataIntegrityViolationException` → `409` for a uni
 nothing more specific to do with them than a generic `500` anyway. Handle those with one catch-all
 `@ExceptionHandler(Exception.class)` in `GlobalExceptionHandler` instead of scattering speculative
 `try`/`catch` through every repository call.
+
+## A derived repository method name (`findByXAndY`) has no implementation anywhere — Spring parses it into a query at startup
+
+**Context**: came up explaining `AccountRepository.findByUserId(UUID)` — there's no method body
+anywhere, and no hand-written SQL, yet it works.
+
+**Why**: Spring Boot never generates a hand-written implementation for a `JpaRepository` subinterface
+— it builds a dynamic proxy backed by `SimpleJpaRepository`. For a non-CRUD method name, that proxy
+runs the method name through `PartTree` *once, at application startup* (not per call): it strips the
+`findBy`/`getBy` prefix, splits what's left on `And`/`Or` into parts (`findByUserId` → `[UserId]`,
+`findByUserIdAndType` → `[UserId, Type]`), and resolves each part against the entity's actual
+properties via reflection — including walking nested paths (`findByUser_Email` or `findByUserEmail`
+if the entity has a `User user` with an `email` field). From that parsed structure it synthesizes a
+real JPQL query (effectively `SELECT a FROM Account a WHERE a.userId = :userId`), cached from then on
+— the method name is a compile-time-checked DSL for a query, not a label on hand-written logic.
+
+**The useful side effect**: an unparseable name (typo'd property, unsupported keyword) fails at
+*startup* with `PropertyReferenceException`, not as a runtime 500 later — broken derived queries are
+caught before the app even finishes booting.
+
+**When the naming convention stops being enough**: `@Query` (JPQL or `nativeQuery = true`) for
+anything the name-parser can't express cleanly — joins, aggregations, subqueries — or
+`Specification`/Querydsl for predicates composed dynamically at runtime rather than fixed at compile
+time. This project's own convention (`structure.md`) is to avoid `@Query` unless there's a real
+complexity/scale reason, which lines up with the tradeoff above: derived queries are both cheaper to
+read and fail louder when wrong, so they're the right default until a query needs expressiveness the
+name-parser genuinely can't give it.
+
+## Pairing an indexed column with a non-indexed one in a query doesn't lose the index — it narrows via the index, then filters the rest
+
+**Context**: came up reasoning about `findByIdAndUserId`-shaped queries on `Account` — `id` is the
+PK (indexed), `userId` isn't. Question was whether combining them in one query loses the benefit of
+the PK index.
+
+**Why it doesn't**: Postgres's planner uses the indexed column to narrow down to candidate rows
+first (`Index Cond` in an `EXPLAIN` plan), then evaluates any non-indexed predicate as a `Filter`
+applied only to whatever rows the index step already returned — not a second table scan. The filter
+step's cost scales with how many rows survived the index narrowing, not with table size and not with
+whether that second column has an index. For a unique PK, the index narrows to at most one row, so
+filtering that one row by `userId` is free regardless.
+
+**Where it would actually matter**: if the *indexed* column isn't very selective on its own (e.g. an
+index on `account_type`, which could match thousands of rows), pairing it with a non-indexed filter
+means fetching all those candidates just to discard most of them. That's the case a composite index
+(`(account_type, user_id)`) earns its keep — it pushes both conditions into `Index Cond` instead of
+leaving the second one as a post-fetch `Filter`.
+
+**Takeaway**: the question to ask isn't "is every column in my WHERE clause indexed" — it's "how
+selective is the indexed column by itself." Verify the actual plan rather than reasoning about it in
+the abstract: `EXPLAIN ANALYZE SELECT ...` labels each predicate as `Index Cond` or `Filter`
+directly.
 
 ## Adding a catch-all `@ExceptionHandler` silently removes Spring's own unhandled-exception logging — log it yourself
 
