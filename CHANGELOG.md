@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-27
+
 ### Added
 - `PATCH /api/accounts/{id}`: a genuine partial update — any subset of `bankName`, `accountName`,
   and `type` may be supplied, and any field omitted is left unchanged on the account
