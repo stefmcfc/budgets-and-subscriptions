@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `PATCH /api/accounts/{id}`: a genuine partial update — any subset of `bankName`, `accountName`,
+  and `type` may be supplied, and any field omitted is left unchanged on the account
+  (`BACKEND-002-AC-17`). Returns `404` uniformly for a non-existent or non-owned account, same as
+  `GET /api/accounts/{id}` (`AC-18`), and the same malformed/absent-id handling as the `GET`
+  endpoint (`AC-24c`, `AC-24d`). A present-but-blank `bankName`/`accountName` is rejected (`AC-19`),
+  as is a request with all three fields absent (`AC-19a`) and a `type` value that isn't a
+  recognised `AccountType` (`AC-19b`) — the latter two enforced via a derived
+  `@AssertTrue`-annotated boolean method on `AccountUpdateRequest` rather than per-field
+  annotations, since both rules span more than one field. `openingBalance`, `openedOn`, and
+  `balance` are not editable via this endpoint — enforced structurally, since
+  `AccountUpdateRequest` has no fields for them (`AC-20`).
+
 ## [0.8.0] - 2026-10-27
 
 ### Added

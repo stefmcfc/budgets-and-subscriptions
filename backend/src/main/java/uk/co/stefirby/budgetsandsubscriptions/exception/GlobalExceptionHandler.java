@@ -43,8 +43,10 @@ public class GlobalExceptionHandler {
         LOG.warn("HttpMessageNotReadableException", ex);
         ApiError apiError;
         if (ex.getCause() instanceof InvalidFormatException ife) {
-            String value = ife.getValue().toString();
-            String propertyName = ife.getPath().getLast().getPropertyName();
+            String value = String.valueOf(ife.getValue());
+            String propertyName = ife.getPath().isEmpty() || ife.getPath().getLast().getPropertyName() == null
+                ? "request"
+                : ife.getPath().getLast().getPropertyName();
             String errorMessage;
             if (ife.getTargetType().isEnum()) {
                 String validValues = Arrays.stream(ife.getTargetType()

@@ -1,6 +1,7 @@
 package uk.co.stefirby.budgetsandsubscriptions.controller
 
 import jakarta.servlet.http.Cookie
+import uk.co.stefirby.budgetsandsubscriptions.dto.AccountUpdateRequest
 import uk.co.stefirby.budgetsandsubscriptions.exception.AccountNotFoundException
 
 import java.time.Clock
@@ -24,6 +25,7 @@ import uk.co.stefirby.budgetsandsubscriptions.security.util.JwtHelper
 import uk.co.stefirby.budgetsandsubscriptions.service.AccountService
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import static uk.co.stefirby.budgetsandsubscriptions.common.Constants.COOKIE_ACCESS_TOKEN
@@ -40,6 +42,9 @@ class AccountControllerSpec extends Specification {
         ACCOUNT_ACCOUNT_NAME, AccountType.CURRENT, ACCOUNT_OPENING_BALANCE, ACCOUNT_OPENED_ON, ACCOUNT_OPENING_BALANCE)
     private static AccountResponse ACCOUNT_RESPONSE_2 = new AccountResponse(UUID.randomUUID(), ACCOUNT_BANK_NAME_1,
         ACCOUNT_ACCOUNT_NAME_1, AccountType.SAVINGS, ACCOUNT_OPENING_BALANCE_1, ACCOUNT_OPENED_ON_1, ACCOUNT_OPENING_BALANCE_1)
+
+    private static final AccountUpdateRequest ACCOUNT_UPDATE_REQUEST = new AccountUpdateRequest(
+        ACCOUNT_BANK_NAME_1, ACCOUNT_ACCOUNT_NAME_1, AccountType.SAVINGS)
 
     @Autowired
     MockMvc mockMvc
@@ -388,44 +393,213 @@ class AccountControllerSpec extends Specification {
     // PATCH /api/accounts/{id} tests
     //=================================
 
+    @Unroll
     def "BACKEND-002-AC-17: updates an owned account's bank name, account name, and/or type"() {
-        given: "an account owned by the authenticated user and a valid update request"
+        given: "an account owned by the authenticated user and an update request with at least one of bankName, accountName, or type present"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
 
         when: "PATCH /api/accounts/{id} is requested with that account's id"
+            def body = objectMapper.writeValueAsString(payload)
+            def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 200 OK with the updated account"
+            result.andExpect(status().isOk())
+
+        and: "the service got called with the authenticated user"
+            1 * mockAccountService.updateAccount(user.id.toString(), accountId, expectedRequest) >> ACCOUNT_RESPONSE_1
+
+        where:
+            scenario                              | payload                                                     | expectedRequest
+            "only bank name"                      | [bankName: "bank"]                                          | new AccountUpdateRequest("bank", null, null)
+            "only account name"                   | [accountName: "account"]                                    | new AccountUpdateRequest(null, "account", null)
+            "only valid account type"             | [type: "SAVINGS"]                                           | new AccountUpdateRequest(null, null, AccountType.SAVINGS)
+            "bank name and account name"          | [bankName: "bank", accountName: "account"]                  | new AccountUpdateRequest("bank", "account", null)
+            "bank name and valid account type"    | [bankName: "bank", type: "SAVINGS"]                         | new AccountUpdateRequest("bank", null, AccountType.SAVINGS)
+            "account name and valid account type" | [accountName: "account", type: "SAVINGS"]                   | new AccountUpdateRequest(null, "account", AccountType.SAVINGS)
+            "three valid fields"                  | [bankName: "bank", accountName: "account", type: "SAVINGS"] | new AccountUpdateRequest("bank", "account", AccountType.SAVINGS)
     }
 
     def "BACKEND-002-AC-18: returns 404 uniformly for a non-existent or non-owned account on update"() {
         given: "either a non-existent account id, or an account id owned by a different user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+            AccountUpdateRequest request = ACCOUNT_UPDATE_REQUEST
 
         when: "PATCH /api/accounts/{id} is requested with that id"
+            def body = objectMapper.writeValueAsString(request)
+            def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 404 Not Found in both cases"
+            result.andExpect(status().isNotFound())
 
-        and: "no account is modified"
+        and: "the service got called with the authenticated user"
+            1 * mockAccountService.updateAccount(user.id.toString(), accountId, request) >>
+                { throw new AccountNotFoundException("Account not found") }
     }
 
-    def "BACKEND-002-AC-19: rejects an update with a blank bank name or account name"() {
-        given: "an account owned by the authenticated user and an update request with a blank bankName or accountName"
+    @Unroll
+    def "BACKEND-002-AC-19: rejects an update with #scenario"() {
+        given: "an account owned by the authenticated user and an update request where bankName or accountName is present but blank"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
 
         when: "PATCH /api/accounts/{id} is requested"
+            def body = objectMapper.writeValueAsString(payload)
+            def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
 
-        and: "the account is not modified"
+        and: "no account is modified"
+            0 * mockAccountService.updateAccount(_ as String, _ as UUID, _ as AccountUpdateRequest)
+
+        where:
+            scenario               | payload
+            "empty bank name"      | [bankName: ""]
+            "blank bank name"      | [bankName: "      "]
+            "empty account name"   | [accountName: ""]
+            "blank account name"   | [accountName: "      "]
+    }
+
+    @Unroll
+    def "BACKEND-002-AC-19a: rejects an update with (#scenario)"() {
+        given: "an account owned by the authenticated user and an update request with bankName, accountName, and type all absent"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+
+        when: "PATCH /api/accounts/{id} is requested"
+            def body = objectMapper.writeValueAsString(payload)
+            def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
+
+        then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
+
+        and: "no account is modified"
+            0 * mockAccountService.updateAccount(_ as String, _ as UUID, _ as AccountUpdateRequest)
+
+        where:
+            scenario               | payload
+            "null bank name"       | [bankName: null]
+            "null account name"    | [accountName: null]
+            "null account type"    | [type: null]
+            "empty payload"        | [:]
+    }
+
+    @Unroll
+    def "BACKEND-002-AC-19b: rejects an update with an unrecognised type value (#scenario)"() {
+        given: "an account owned by the authenticated user and an update request where type is present but not a valid AccountType"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+
+        when: "PATCH /api/accounts/{id} is requested"
+            def body = objectMapper.writeValueAsString(payload)
+            def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
+
+        then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
+
+        and: "no account is modified"
+            0 * mockAccountService.updateAccount(_ as String, _ as UUID, _ as AccountUpdateRequest)
+
+        where:
+            scenario               | payload
+            "empty account type"   | [type: ""]
+            "blank account type"   | [type: "      "]
+            "unknown account type" | [type: "UNKNOWN"]
     }
 
     def "BACKEND-002-AC-20: leaves openingBalance, openedOn, and balance unchanged on update"() {
         given: "an account owned by the authenticated user and an update request body that also includes openingBalance, openedOn, and balance values"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+            AccountUpdateRequest request = ACCOUNT_UPDATE_REQUEST
 
         when: "PATCH /api/accounts/{id} is requested"
+            def payload = [
+                "bankName" : ACCOUNT_BANK_NAME_1,
+                "accountName" : ACCOUNT_ACCOUNT_NAME_1,
+                "type" : AccountType.SAVINGS.name(),
+                "openingBalance" : ACCOUNT_OPENING_BALANCE,
+                "openedOn" : ACCOUNT_OPENED_ON,
+                "balance": ACCOUNT_OPENING_BALANCE
+            ]
+            def body = objectMapper.writeValueAsString(payload)
+            def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 200 OK"
+            result.andExpect(status().isOk())
 
-        and: "the account's openingBalance, openedOn, and balance are unchanged from before the request"
+        and: "the request to the service only contains the allowed fields (bankName, accountName and type)"
+            1 * mockAccountService.updateAccount(user.id.toString(), accountId, request) >> ACCOUNT_RESPONSE_1
+    }
 
-        and: "only bankName, accountName, and/or type reflect the request"
+    @Unroll
+    def "BACKEND-002-AC-24c: returns 400 for a malformed (#scenario) id on update"() {
+        given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            AccountUpdateRequest request = ACCOUNT_UPDATE_REQUEST
+
+        when: "PATCH /api/accounts/{id} is requested with an malformed id"
+            def body = objectMapper.writeValueAsString(request)
+            def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
+
+        then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
+
+        and: "no account is modified"
+            0 * mockAccountService.updateAccount(_ as String, _ as UUID, _ as AccountUpdateRequest)
+
+        where:
+            scenario   | accountId
+            "null"     | null
+            "non-uuid" | "not a uuid"
+    }
+
+    @Unroll
+    def "BACKEND-002-AC-24d: returns 404 for an absent (#scenario) account id on update"() {
+        given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            AccountUpdateRequest request = ACCOUNT_UPDATE_REQUEST
+
+        when: "PATCH /api/accounts/{id} is requested with an absent id"
+            def body = objectMapper.writeValueAsString(request)
+            def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .contentType("application/json")
+                .content(body))
+
+        then: "the response is 404 Not Found"
+            result.andExpect(status().isNotFound())
+
+        and: "no account is modified"
+            0 * mockAccountService.updateAccount(_ as String, _ as UUID, _ as AccountUpdateRequest)
+
+        where:
+            scenario     | accountId
+            "empty"      | ""
+            "blank"      | "     "
     }
 
     //---------------------------------

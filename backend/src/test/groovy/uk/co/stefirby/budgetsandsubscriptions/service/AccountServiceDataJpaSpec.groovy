@@ -8,11 +8,14 @@ import spock.lang.Specification
 import spock.lang.Subject
 import uk.co.stefirby.budgetsandsubscriptions.dto.AccountCreateRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.AccountResponse
+import uk.co.stefirby.budgetsandsubscriptions.dto.AccountUpdateRequest
 import uk.co.stefirby.budgetsandsubscriptions.exception.AccountNotFoundException
 import uk.co.stefirby.budgetsandsubscriptions.model.Account
 import uk.co.stefirby.budgetsandsubscriptions.model.AccountType
 import uk.co.stefirby.budgetsandsubscriptions.repository.AccountRepository
 import uk.co.stefirby.budgetsandsubscriptions.repository.UserRepository
+
+import java.time.LocalDate
 
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountConstants.*
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountEntityHelper.createAccount1
@@ -37,6 +40,10 @@ class AccountServiceDataJpaSpec extends Specification {
         accountService = new AccountService(accountRepository)
     }
 
+    //----------------------------
+    // createAccount tests
+    //============================
+
     def "BACKEND-002-AC-07: when account is created then DB fields are set accordingly"() {
         given: "valid user with UUID format"
             UUID uuid = createUser(userRepository)
@@ -60,6 +67,10 @@ class AccountServiceDataJpaSpec extends Specification {
         and: "the created account is owned by the authenticated user"
             savedAccount.userId == uuid
     }
+
+    //----------------------------
+    // getAccounts tests
+    //============================
 
     def "BACKEND-002-AC-13: lists only the authenticated user's own accounts"() {
         given: "two users, first one has 2 accounts, second has 1"
@@ -94,6 +105,10 @@ class AccountServiceDataJpaSpec extends Specification {
         then: "response is an empty list"
             user1AccountList.size() == 0
     }
+
+    //----------------------------
+    // getAccount tests
+    //============================
 
     def "BACKEND-002-AC-15: returns a single owned account"() {
         given: "a user, with 2 accounts"
@@ -133,5 +148,46 @@ class AccountServiceDataJpaSpec extends Specification {
 
         then: "exception is thrown"
             thrown(AccountNotFoundException)
+    }
+
+    //----------------------------
+    // updateAccount tests
+    //============================
+
+    def "BACKEND-002-AC-17: updates an owned account's bank name, account name, or type"() {
+        given: "an account owned by the authenticated user"
+            String oldBankName = "Old Bank Name"
+            String oldAccountName = "New Account Name"
+            LocalDate oldOpenedOn = LocalDate.of(2026, 1, 1)
+            BigDecimal oldOpeningBalance = BigDecimal.valueOf(1801.32)
+            AccountType oldAccountType = AccountType.CURRENT
+
+            UUID userId = createUser(userRepository)
+            Account oldAccount = new Account(
+                userId ,oldBankName, oldAccountName, oldOpenedOn,
+                oldOpeningBalance, oldAccountType)
+            Account createdAccount = accountRepository.saveAndFlush(oldAccount)
+
+            UUID accountId = createdAccount.id
+
+        and: "an update request with at least one of bankName, accountName, or type present"
+            String newBankName = "New Bank Name"
+            AccountUpdateRequest request = new AccountUpdateRequest(newBankName, null, null)
+
+        when: "updateAccount is called"
+            AccountResponse response = accountService.updateAccount(userId.toString(), accountId, request)
+
+        then: "any field in the request updated successfully"
+            response.bankName() == newBankName
+
+        and: "any field omitted from the request is unchanged on the account"
+            response.accountName() == createdAccount.accountName
+            response.type() == createdAccount.accountType
+
+        and: "BACKEND-002-AC-20: the account's openingBalance, openedOn, and balance are unchanged from before the request"
+            response.openingBalance() == createdAccount.openingBalance
+            response.openedOn() == createdAccount.openedOn
+            response.balance() == createdAccount.balance
+
     }
 }

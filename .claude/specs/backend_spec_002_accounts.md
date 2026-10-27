@@ -1,6 +1,6 @@
 # Accounts (Backend)
 
-**Status**: In progress (AC-01 through AC-16, AC-24a, AC-24b done, 2026-10-27)
+**Status**: In progress (AC-01 through AC-20, AC-24a through AC-24d done, 2026-10-27)
 **Priority**: P1 — first spec of build order step 2 ("Accounts and transactions"); every
 account-scoped feature (transactions, spending insights, multi-person balances) depends on an
 `Account` existing to attach to.
@@ -215,10 +215,16 @@ would-be `500` becomes `404` instead. A single handler covering both exception t
 **User story**: As a user, I want to rename an account or correct its type after creation,
 without needing to delete and recreate it.
 
-#### BACKEND-002-AC-17 [AUTO]: Valid update to bank name, account name, and/or type succeeds
+#### BACKEND-002-AC-17 [AUTO]: Valid update to bank name, account name, or type succeeds
 **Statement**: When `PATCH /api/accounts/{id}` is requested for an `id` owned by the authenticated
-user with a valid `bankName`, `accountName`, and/or `type`, the `AccountController` shall update
-that account and respond `200 OK` with the updated account.
+user with at least one of `bankName`, `accountName`, or `type` present and valid, the
+`AccountController` shall update only the field(s) provided, leave any omitted field unchanged,
+and respond `200 OK` with the updated account.
+
+**Rationale**: This is a genuine partial update (`PATCH`, not `PUT`) — a caller changing only
+`type` shouldn't have to resend the current `bankName`/`accountName` just to satisfy validation.
+Supersedes the all-three-required reading this AC originally had; see `BACKEND-002-AC-19a` for the
+corresponding "don't accept an empty no-op request" guard this flexibility requires.
 
 #### BACKEND-002-AC-18 [AUTO]: Not-found and not-owned are indistinguishable
 **Statement**: If `PATCH /api/accounts/{id}` is requested for an `id` that does not exist, or that
@@ -227,9 +233,45 @@ cases, and shall not modify any account.
 
 **Rationale**: Same uniform-failure principle as `BACKEND-002-AC-16`.
 
-#### BACKEND-002-AC-19 [AUTO]: Blank bank name or account name rejected on update
-**Statement**: If `PATCH /api/accounts/{id}` is requested with a blank `bankName` or `accountName`,
-then the `AccountController` shall respond `400 Bad Request` and shall not modify the account.
+#### BACKEND-002-AC-19 [AUTO]: A present-but-blank bank name or account name is rejected on update
+**Statement**: If `PATCH /api/accounts/{id}` is requested with `bankName` or `accountName` present
+in the request body but blank, then the `AccountController` shall respond `400 Bad Request` and
+shall not modify the account.
+
+**Rationale**: Reworded for `BACKEND-002-AC-17`'s partial-update semantics — "blank" now means
+"the field was included but empty/whitespace," distinct from omitting the field entirely (which is
+valid and means "leave unchanged"). A blank value is never a meaningful update, whether `PATCH` is
+full or partial, so this AC's substance is unchanged — only the "blank" vs. "absent" distinction is
+now load-bearing.
+
+#### BACKEND-002-AC-19a [AUTO]: An update with no fields provided is rejected
+**Statement**: If `PATCH /api/accounts/{id}` is requested with `bankName`, `accountName`, and
+`type` all absent from the request body, then the `AccountController` shall respond
+`400 Bad Request` and shall not modify the account.
+
+**Rationale**: Direct consequence of `BACKEND-002-AC-17` allowing any subset of the three fields —
+without this guard, an empty `{}` body would be a valid no-op `200`, which is a confusing success
+response for a request that asked for nothing. Enforced via a derived `@AssertTrue`-annotated
+boolean method on `AccountUpdateRequest` (e.g. `isAtLeastOneFieldPresent()`) rather than a
+field-level annotation, since the rule spans all three fields at once — see `BACKEND-002-AC-19`'s
+per-field blank check for the complementary single-field rule. Also covers a request that supplies
+exactly one field with an explicit JSON `null` and omits the other two (e.g. `{"type": null}`) —
+once bound, that's indistinguishable from `{}` (a missing key and an explicit `null` both resolve
+to a `null` component on the record), so it's the same "nothing meaningful was provided" case, not
+`BACKEND-002-AC-19`'s blank-value case.
+
+#### BACKEND-002-AC-19b [AUTO]: An invalid type value is rejected on update
+**Statement**: If `PATCH /api/accounts/{id}` is requested with a `type` value present in the
+request body but not a recognised `AccountType` constant, then the `AccountController` shall
+respond `400 Bad Request` and shall not modify the account.
+
+**Rationale**: Same mechanism as `BACKEND-002-AC-10`'s create-side equivalent — an unrecognised
+`type` string fails Jackson's enum conversion during request-body deserialization itself, before
+`AccountUpdateRequest`'s own `@AssertTrue` constraints ever get to run, surfacing via the existing
+`HttpMessageNotReadableException` handler. Distinct from both `BACKEND-002-AC-19` (`type` isn't a
+`String`, so "blank" doesn't apply to it) and `BACKEND-002-AC-19a` (`type` was actually supplied
+here, just with an unusable value) — a third, genuinely different failure mechanism that happens
+to also return `400`. No new code: only new test coverage for this field.
 
 #### BACKEND-002-AC-20 [AUTO]: openingBalance, openedOn, and balance are not editable via this endpoint
 **Statement**: When `PATCH /api/accounts/{id}` is requested with an `openingBalance`, `openedOn`,
@@ -246,6 +288,25 @@ deleting and recreating the account (`BACKEND-002-AC-21`) for now. This is enfor
 the `AccountUpdateRequest` DTO simply has no field for `openingBalance`/`openedOn`/`balance` —
 rather than by a runtime rejection, so this AC's test asserts those values survive unchanged
 through a request body that includes them anyway (e.g. an extra, unrecognised JSON field).
+
+#### BACKEND-002-AC-24c [AUTO]: A supplied-but-invalid id is a 400, not a 404 or 500
+**Statement**: If `PATCH /api/accounts/{id}` is requested with an `id` path segment that is
+present but not a valid UUID, then the `AccountController` shall respond `400 Bad Request` and
+shall not modify any account.
+
+**Rationale**: Same mechanism as `BACKEND-002-AC-24a`, applying to `PATCH` — the `id` path
+variable is converted before the controller method runs regardless of HTTP verb, so an
+unconvertible id fails identically here. No new code: the same `MethodArgumentTypeMismatchException`
+`GlobalExceptionHandler` mapping already covers this; only new test coverage for this verb.
+
+#### BACKEND-002-AC-24d [AUTO]: An absent id is a 404, not a 400 or 500
+**Statement**: If `PATCH /api/accounts/{id}` is requested with an `id` path segment that is empty
+or blank, then the `AccountController` shall respond `404 Not Found` and shall not modify any
+account.
+
+**Rationale**: Same mechanism as `BACKEND-002-AC-24b`, applying to `PATCH`. No new code: the same
+combined `NoResourceFoundException`/`MissingPathVariableException` `GlobalExceptionHandler`
+mapping already covers this; only new test coverage for this verb.
 
 ### Requirement 6: Delete an account
 
@@ -267,6 +328,25 @@ that belongs to a different user, then the `AccountController` shall respond `40
 both cases, and shall not delete any account.
 
 **Rationale**: Same uniform-failure principle as `BACKEND-002-AC-16`/`BACKEND-002-AC-18`.
+
+#### BACKEND-002-AC-24e [AUTO]: A supplied-but-invalid id is a 400, not a 404 or 500
+**Statement**: If `DELETE /api/accounts/{id}` is requested with an `id` path segment that is
+present but not a valid UUID, then the `AccountController` shall respond `400 Bad Request` and
+shall not delete any account.
+
+**Rationale**: Same mechanism as `BACKEND-002-AC-24a`, applying to `DELETE` — the `id` path
+variable is converted before the controller method runs regardless of HTTP verb, so an
+unconvertible id fails identically here. No new code: the same `MethodArgumentTypeMismatchException`
+`GlobalExceptionHandler` mapping already covers this; only new test coverage for this verb.
+
+#### BACKEND-002-AC-24f [AUTO]: An absent id is a 404, not a 400 or 500
+**Statement**: If `DELETE /api/accounts/{id}` is requested with an `id` path segment that is
+empty or blank, then the `AccountController` shall respond `404 Not Found` and shall not delete
+any account.
+
+**Rationale**: Same mechanism as `BACKEND-002-AC-24b`, applying to `DELETE`. No new code: the same
+combined `NoResourceFoundException`/`MissingPathVariableException` `GlobalExceptionHandler`
+mapping already covers this; only new test coverage for this verb.
 
 ### Requirement 7: Accounts endpoints inherit authentication, not reinvent it
 
@@ -293,7 +373,7 @@ AC exists as a tested regression guard for that default, not to introduce new fi
 | `POST /api/accounts`, `GET /api/accounts`, `GET /api/accounts/{id}`, `PATCH /api/accounts/{id}`, `DELETE /api/accounts/{id}`    | This spec                                                            | `frontend_spec_002_accounts.md` (future)                                                                                                                                    |
 | Owner-scoping via `@AuthenticationPrincipal String userId` / `JwtAuthenticationFilter`                                          | `backend_spec_001_basic_login.md` (`AUTH-001-AC-20` through `AC-23`) | This spec (every endpoint)                                                                                                                                                  |
 | `User` entity (owner FK target)                                                                                                 | `backend_spec_001_basic_login.md` (`AUTH-001-AC-01` through `AC-04`) | This spec                                                                                                                                                                   |
-| `GlobalExceptionHandler` / custom-exception pattern (`DuplicateEmailException`, `LoginException`, `UserException` as precedent) | `backend_spec_001_basic_login.md`                                    | This spec (adds an account-not-found exception mapped to `404`, an `HttpMessageNotReadableException` handler mapped to `400` per `BACKEND-002-AC-10`'s rationale, a `MethodArgumentTypeMismatchException` handler mapped to `400` per `BACKEND-002-AC-24a`'s rationale, and a combined `NoResourceFoundException`/`MissingPathVariableException` handler mapped to `404` per `BACKEND-002-AC-24b`'s rationale) |
+| `GlobalExceptionHandler` / custom-exception pattern (`DuplicateEmailException`, `LoginException`, `UserException` as precedent) | `backend_spec_001_basic_login.md`                                    | This spec (adds an account-not-found exception mapped to `404`, an `HttpMessageNotReadableException` handler mapped to `400` per `BACKEND-002-AC-10`'s rationale, a `MethodArgumentTypeMismatchException` handler mapped to `400` per `BACKEND-002-AC-24a`'s rationale — also covering `PATCH`/`DELETE` per `BACKEND-002-AC-24c`/`BACKEND-002-AC-24e` — and a combined `NoResourceFoundException`/`MissingPathVariableException` handler mapped to `404` per `BACKEND-002-AC-24b`'s rationale — also covering `PATCH`/`DELETE` per `BACKEND-002-AC-24d`/`BACKEND-002-AC-24f`; all three verbs share the same handlers, keyed on exception type not endpoint) |
 | Account types/fields/running-balance decisions                                                                                  | `.claude/02-accounts-and-transactions/design-decisions.md`           | This spec                                                                                                                                                                   |
 | Deferred account concepts (credit cards, investment/pension/Stocks & Shares ISA, encrypted sort-code/account-number, archiving) | `.claude/02-accounts-and-transactions/spec_candidates.md`            | N/A — confirms these aren't part of this spec                                                                                                                               |
 
@@ -315,15 +395,21 @@ AC exists as a tested regression guard for that default, not to introduce new fi
 - [x] BACKEND-002-AC-14 [AUTO]: `GET /api/accounts` returns an empty list when the user has no accounts
 - [x] BACKEND-002-AC-15 [AUTO]: `GET /api/accounts/{id}` returns an owned account, 200
 - [x] BACKEND-002-AC-16 [AUTO]: `GET /api/accounts/{id}` returns 404 uniformly for not-found and not-owned
-- [ ] BACKEND-002-AC-17 [AUTO]: Valid `PATCH /api/accounts/{id}` updates bank name/account name/type, returns 200
-- [ ] BACKEND-002-AC-18 [AUTO]: `PATCH /api/accounts/{id}` returns 404 uniformly for not-found and not-owned
-- [ ] BACKEND-002-AC-19 [AUTO]: Blank `bankName` or `accountName` on update returns 400, no modification
-- [ ] BACKEND-002-AC-20 [AUTO]: `openingBalance`/`openedOn`/`balance` are not modifiable via the update endpoint
+- [x] BACKEND-002-AC-17 [AUTO]: Valid `PATCH /api/accounts/{id}` updates any subset of bank name/account name/type, returns 200
+- [x] BACKEND-002-AC-18 [AUTO]: `PATCH /api/accounts/{id}` returns 404 uniformly for not-found and not-owned
+- [x] BACKEND-002-AC-19 [AUTO]: Present-but-blank `bankName` or `accountName` on update returns 400, no modification
+- [x] BACKEND-002-AC-19a [AUTO]: Update with `bankName`, `accountName`, and `type` all absent returns 400, no modification
+- [x] BACKEND-002-AC-19b [AUTO]: A present-but-unrecognised `type` value on update returns 400, no modification
+- [x] BACKEND-002-AC-20 [AUTO]: `openingBalance`/`openedOn`/`balance` are not modifiable via the update endpoint
 - [ ] BACKEND-002-AC-21 [AUTO]: `DELETE /api/accounts/{id}` deletes an owned account, 204
 - [ ] BACKEND-002-AC-22 [AUTO]: `DELETE /api/accounts/{id}` returns 404 uniformly for not-found and not-owned
 - [ ] BACKEND-002-AC-23 [AUTO]: Unauthenticated requests to any `/api/accounts` route are rejected 401 before the controller runs
 - [x] BACKEND-002-AC-24a [AUTO]: `GET /api/accounts/{id}` with a supplied-but-invalid (non-UUID) id returns 400, not 404 or 500
 - [x] BACKEND-002-AC-24b [AUTO]: `GET /api/accounts/{id}` with an absent (empty/blank) id returns 404, not 400 or 500
+- [x] BACKEND-002-AC-24c [AUTO]: `PATCH /api/accounts/{id}` with a supplied-but-invalid (non-UUID) id returns 400, not 404 or 500, no modification
+- [x] BACKEND-002-AC-24d [AUTO]: `PATCH /api/accounts/{id}` with an absent (empty/blank) id returns 404, not 400 or 500, no modification
+- [ ] BACKEND-002-AC-24e [AUTO]: `DELETE /api/accounts/{id}` with a supplied-but-invalid (non-UUID) id returns 400, not 404 or 500, no deletion
+- [ ] BACKEND-002-AC-24f [AUTO]: `DELETE /api/accounts/{id}` with an absent (empty/blank) id returns 404, not 400 or 500, no deletion
 
 ## Test case sketches
 
@@ -523,12 +609,14 @@ def "BACKEND-002-AC-24b: returns 404 for an absent (empty or blank) id"() {
 ```
 
 ```groovy
-def "BACKEND-002-AC-17: updates an owned account's bank name, account name, and/or type"() {
-    given: "an account owned by the authenticated user and a valid update request"
+def "BACKEND-002-AC-17: updates an owned account's bank name, account name, or type"() {
+    given: "an account owned by the authenticated user and an update request with at least one of bankName, accountName, or type present"
 
     when: "PATCH /api/accounts/{id} is requested with that account's id"
 
     then: "the response is 200 OK with the updated account"
+
+    and: "any field omitted from the request is unchanged on the account"
 }
 ```
 
@@ -545,8 +633,32 @@ def "BACKEND-002-AC-18: returns 404 uniformly for a non-existent or non-owned ac
 ```
 
 ```groovy
-def "BACKEND-002-AC-19: rejects an update with a blank bank name or account name"() {
-    given: "an account owned by the authenticated user and an update request with a blank bankName or accountName"
+def "BACKEND-002-AC-19: rejects an update with a present-but-blank bank name or account name"() {
+    given: "an account owned by the authenticated user and an update request where bankName or accountName is present but blank"
+
+    when: "PATCH /api/accounts/{id} is requested"
+
+    then: "the response is 400 Bad Request"
+
+    and: "the account is not modified"
+}
+```
+
+```groovy
+def "BACKEND-002-AC-19a: rejects an update with no fields provided"() {
+    given: "an account owned by the authenticated user and an update request with bankName, accountName, and type all absent"
+
+    when: "PATCH /api/accounts/{id} is requested"
+
+    then: "the response is 400 Bad Request"
+
+    and: "the account is not modified"
+}
+```
+
+```groovy
+def "BACKEND-002-AC-19b: rejects an update with an unrecognised type value"() {
+    given: "an account owned by the authenticated user and an update request where type is present but not a valid AccountType"
 
     when: "PATCH /api/accounts/{id} is requested"
 
@@ -566,7 +678,31 @@ def "BACKEND-002-AC-20: leaves openingBalance, openedOn, and balance unchanged o
 
     and: "the account's openingBalance, openedOn, and balance are unchanged from before the request"
 
-    and: "only bankName, accountName, and/or type reflect the request"
+    and: "only the fields present in the request (bankName, accountName, or type) reflect it"
+}
+```
+
+```groovy
+def "BACKEND-002-AC-24c: returns 400 for a supplied-but-invalid (non-UUID) id on update"() {
+    given: "an authenticated user"
+
+    when: "PATCH /api/accounts/{id} is requested with an id that is the string \"null\" or not a UUID"
+
+    then: "the response is 400 Bad Request"
+
+    and: "no account is modified"
+}
+```
+
+```groovy
+def "BACKEND-002-AC-24d: returns 404 for an absent (empty or blank) id on update"() {
+    given: "an authenticated user"
+
+    when: "PATCH /api/accounts/{id} is requested with an id that is empty or blank"
+
+    then: "the response is 404 Not Found"
+
+    and: "no account is modified"
 }
 ```
 
@@ -589,6 +725,30 @@ def "BACKEND-002-AC-22: returns 404 uniformly for a non-existent or non-owned ac
     when: "DELETE /api/accounts/{id} is requested with that id"
 
     then: "the response is 404 Not Found in both cases"
+
+    and: "no account is deleted"
+}
+```
+
+```groovy
+def "BACKEND-002-AC-24e: returns 400 for a supplied-but-invalid (non-UUID) id on delete"() {
+    given: "an authenticated user"
+
+    when: "DELETE /api/accounts/{id} is requested with an id that is the string \"null\" or not a UUID"
+
+    then: "the response is 400 Bad Request"
+
+    and: "no account is deleted"
+}
+```
+
+```groovy
+def "BACKEND-002-AC-24f: returns 404 for an absent (empty or blank) id on delete"() {
+    given: "an authenticated user"
+
+    when: "DELETE /api/accounts/{id} is requested with an id that is empty or blank"
+
+    then: "the response is 404 Not Found"
 
     and: "no account is deleted"
 }

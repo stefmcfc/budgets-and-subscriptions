@@ -96,4 +96,16 @@ public class Account {
     public Instant getCreatedAt() {
         return createdAt;
     }
+
+    public void setAccountType(AccountType accountType) {
+        this.accountType = accountType;
+    }
+
+    public void setAccountName(String accountName) {
+        this.accountName = accountName;
+    }
+
+    public void setBankName(String bankName) {
+        this.bankName = bankName;
+    }
 }

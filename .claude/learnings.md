@@ -70,6 +70,36 @@ Hibernate's default `FlushMode.AUTO` auto-flushes pending changes before running
 same session, which isn't what the actual test code does. If the debugger surfaces an exception the
 test doesn't, suspect a missing flush before reaching for any other explanation.
 
+## Calling a setter on an entity already loaded in the same transaction is enough to persist it — `save()`/`saveAndFlush()` is only essential for a *new* entity
+
+**Context**: `AccountService.updateAccount` loads the account via
+`accountRepository.findByIdAndUserId(...)`, calls setters on it, then calls
+`accountRepository.saveAndFlush(account)` before returning — raising the question of whether that
+final call does anything `createAccount`'s equivalent call doesn't already cover for free.
+
+**Why `saveAndFlush` is optional here but not in `createAccount`**: an entity returned by a
+repository query inside an open `@Transactional` method stays *managed* — still attached to
+Hibernate's persistence context for the rest of the method. Hibernate keeps a snapshot of a managed
+entity's state from when it was loaded, and any setter call marks it dirty; at the next flush
+(automatically, at transaction commit — no explicit call needed) Hibernate diffs current values
+against that snapshot and emits whatever `UPDATE` is needed on its own. `createAccount`'s entity, by
+contrast, is brand-new and was never in the persistence context — there's no snapshot to diff
+against, so `save()` there isn't a flush-timing nicety, it's the only thing that actually calls
+`persist()`/issues the `INSERT` at all (and is how the generated ID gets back onto the object).
+
+**Practical consequence**: calling `setXxx(value)` with the *same* value the entity already has is
+also already a no-op at the SQL level for free — Hibernate's dirty check is a value comparison
+against the snapshot, not "was a setter invoked," so an unchanged field (or an unchanged whole
+entity) produces no `UPDATE` regardless of how many setters got called. No manual "is this actually
+different" check is needed to avoid a wasted write.
+
+**Takeaway**: keeping an explicit `saveAndFlush` call on a mutated *managed* entity is a legitimate,
+deliberate readability choice — it documents "this mutation is meant to be persisted" right at the
+point of mutation, and keeps the method's shape consistent with a sibling `create` method — but
+it's optional, not required, precisely because the entity never left the persistence context. The
+moment an entity genuinely is new or detached, that call stops being optional and starts being the
+actual mechanism.
+
 ## `@Enumerated(EnumType.STRING)`, not `EnumType.ORDINAL`
 
 **Context**: `User.role` needed to map the `Role` enum (`USER`/`ADMIN`) to a database column.
@@ -156,6 +186,62 @@ number, a date, or anything else that isn't a `CharSequence`/collection-like typ
 collection/array/map. **General tell**: if a `500` shows up on a request that should cleanly fail
 validation with `400`, check whether every Bean Validation annotation on the DTO is even
 applicable to its field's declared type before looking anywhere else.
+
+## Jakarta Bean Validation discovers constraints on any getter-*shaped* method, not just real fields — useful for cross-field rules a record's fields can't carry alone
+
+**Context**: `BACKEND-002-AC-19a` needed "at least one of `bankName`/`accountName`/`type` must be
+provided" — a rule spanning all three fields of `AccountUpdateRequest`, which no single
+`@NotNull`/`@NotBlank` on one field alone can express.
+
+**Why this is possible on a record at all**: Bean Validation doesn't only look at annotated fields
+— Hibernate Validator also inspects any method shaped like a JavaBean getter (`isXxx()` returning
+`boolean`, or `getXxx()`), the same mechanism that lets it read a real property. A record's
+canonical accessors (`bankName()`, `accountName()`, `type()`) don't fit that shape (no `is`/`get`
+prefix), but a record can carry *extra* instance methods beyond its canonical ones — so adding
+`public boolean isAtLeastOneFieldPresent() { ... }` and putting `@AssertTrue` on *that method* gives
+the validator a hook with visibility into all three fields at once, discovered and invoked by
+reflection exactly the way a real `@NotBlank` field is — no custom `@Constraint`
+annotation/validator class needed.
+
+**The one easy-to-miss requirement**: the method name's *shape* is load-bearing, not just the
+annotation — it must start with `is`/`get`, take no arguments, and (for `@AssertTrue` specifically)
+return `boolean`. A differently-named method carrying the exact same annotation simply won't be
+found.
+
+**Side effect worth handling**: a method named this way also looks like a real bean-getter to
+*Jackson*, not just to the validator — without `@JsonIgnore` on it, serializing the record (e.g.
+`objectMapper.writeValueAsString(request)` to build a test payload) would include a synthetic
+`"atLeastOneFieldPresent": true` property that was never a real field. Add `@JsonIgnore` alongside
+`@AssertTrue` on any method used this way.
+
+**Mental model for "no usages" IDE warnings**: this method is never called directly by any of your
+own code — same as a `GlobalExceptionHandler`'s `@ExceptionHandler` methods, it's discovered and
+invoked by a framework via reflection, triggered here by `@Valid` on the controller's `@RequestBody`
+parameter. An IDE flagging it unused is a false positive for the same reason it would be on an
+`@ExceptionHandler` method.
+
+## A missing JSON key and an explicit JSON `null` bind to the identical value on a record — Bean Validation can't tell them apart
+
+**Context**: deciding what "a field wasn't provided" should mean for `AccountUpdateRequest` once
+`BACKEND-002-AC-17` made it a genuine partial update. Writing `BACKEND-002-AC-19`'s `where:` table,
+rows like `[bankName: null]` (one key, explicit `null` value, the other two keys absent) were
+expected to test "blank value rejected" — they didn't.
+
+**Why**: for a reference-typed record component, Jackson binds a missing JSON key and an explicit
+`"key": null` to the exact same Java value — `null`. There's no way, once the object is
+constructed, to tell "the client deliberately said this field is null" apart from "the client never
+mentioned this field at all." So `{"bankName": null}` with the other two keys absent produces
+`AccountUpdateRequest(null, null, null)` — indistinguishable, at the validation layer, from sending
+`{}`. It trips the *all-three-absent* constraint (`BACKEND-002-AC-19a`'s
+`isAtLeastOneFieldPresent()`), not the *present-but-blank* one (`BACKEND-002-AC-19`'s
+`isProvidedTextFieldsNotBlank()`), because as far as the bound object is concerned, nothing was
+actually present.
+
+**Fix / takeaway**: a "blank" check on a `String` field can only ever fire for a genuinely empty or
+whitespace-only string (`""`, `"   "`) — never for `null`, since `null` always collapses into "not
+provided," not "provided but empty." When writing data-driven tests for a partial-update DTO, keep
+"value is `null`" and "value is blank" as separate test groups up front — they're not two flavors
+of the same rejection, they exercise two different constraints entirely.
 
 ## An invalid enum string in a JSON body fails before Bean Validation ever runs — a different exception type than a missing/blank field
 
@@ -267,6 +353,34 @@ case — see the previous entry).
 it actually becomes once it's concatenated into a URL — it almost certainly isn't absence, it's the
 text `"null"`, and will exercise whichever code path handles *that* string, not whichever path (if
 any) handles a missing segment.
+
+## A Groovy literal wrapped in outer quotes is a `String`, not the `Map`/`List` it looks like — and `ObjectMapper` will happily double-encode it
+
+**Context**: building `where:`-table JSON payloads for `BACKEND-002-AC-17`'s partial-update test, a
+row was written as `"[\"bankName\": \"bank\"]"` — intended as a map literal — then passed to
+`objectMapper.writeValueAsString(payload)`. The identical mistake reappeared independently in
+`BACKEND-002-AC-19a`'s hand-written test as `String payload = "[]"`, intended as an empty body.
+
+**Why**: the outer pair of `"` makes the whole thing a Groovy `String` literal; its contents only
+*look* like a map/list syntactically. `objectMapper.writeValueAsString(aString)` does exactly what
+it's told — it serializes a `String` the only way Jackson knows how, by quoting and escaping it as a
+JSON string. The result is a JSON *string* token (`"[\"bankName\": \"bank\"]"`), not a JSON *object*
+(`{"bankName":"bank"}`). When that hits a controller expecting an object-shaped DTO, Jackson fails
+with `MismatchedInputException: ... no String-argument constructor/factory method to deserialize
+from String value (...)` — an error that names the DTO, not the real cause several steps upstream.
+
+**Fix**: write the literal as a genuine Groovy `Map`/`List`, with no surrounding quotes or escaping —
+`[bankName: "bank"]` instead of `"[\"bankName\": \"bank\"]"`, `[:]` instead of `"[]"` for an empty
+object. **General tell**: if `objectMapper.writeValueAsString(x)` is being called on something
+that's supposed to represent a JSON object/array, check `x`'s actual Groovy type isn't secretly
+`String` before looking anywhere else.
+
+**Danger of a false-positive pass**: this exact bug in the `AC-19a` test didn't fail loudly — it
+still returned `400` as asserted, just via `HttpMessageNotReadableException` (malformed body)
+rather than the `@AssertTrue` constraint the test was actually meant to exercise. The test was green
+for the wrong reason, and would have stayed green even if the real validation rule it was supposed
+to protect were deleted entirely. A passing status-code-only assertion doesn't prove the *intended*
+code path ran — only that some code path produced that status.
 
 ## `Stream.toString()` doesn't describe its elements — collect it before putting it in a response
 
