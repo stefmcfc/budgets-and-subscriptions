@@ -120,7 +120,7 @@ requirement as creation above.
   parse/match against this text for pattern detection, but that's a step-3 concern, not this one's.
 - **Account** — every `Transaction` belongs to exactly one `Account` (FK). `Transaction` has **no
   separate owner column of its own** — ownership is transitive through its `Account`, so an
-  authorization check only ever needs to confirm "does the current user own this transaction's
+  authorisation check only ever needs to confirm "does the current user own this transaction's
   account," never a second, independently-maintained owner reference that could drift out of sync.
 - **No currency field in this stage** — see `spec_candidates.md`.
 

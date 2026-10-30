@@ -1,0 +1,3 @@
+-- Scaffolded placeholder (backend_spec_003_transactions.md). Real DDL for the `transactions`
+-- table (columns, FK to accounts, constraints matching the Transaction entity's JPA mapping per
+-- BACKEND-003-AC-05) is the human's to write here.
