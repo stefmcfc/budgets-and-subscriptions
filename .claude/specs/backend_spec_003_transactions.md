@@ -15,8 +15,8 @@ This delivers the `Transaction` entity and its full CRUD surface, every endpoint
 `Account` the authenticated user owns: `amount` (a signed `BigDecimal` — positive for money in,
 negative for money out), `date` (must fall on or after the owning account's `openedOn`), free-text
 `description` (user-facing, editable), an optional free-text `rawDescription` capturing the
-transaction exactly as it appeared on a bank statement/import (nullable, set only at creation and
-never editable afterward — see Requirement 1 and Requirement 5), and an `Account` foreign key. A
+transaction exactly as it appeared on a bank statement/import (nullable, editable to correct a
+mistyped entry — see Requirement 1 and Requirement 5), and an `Account` foreign key. A
 `Transaction` carries no owner column of its own —
 ownership is transitive through its `Account`, so every authorisation check in this spec reduces to
 "does the current user own this transaction's account," never a second, independently-maintained
@@ -258,15 +258,18 @@ entering it, without needing to delete and recreate it.
 #### BACKEND-003-AC-18 [AUTO]: Valid partial update succeeds and the balance is re-derived
 **Statement**: When `PATCH /api/accounts/{accountId}/transactions/{transactionId}` is requested for
 an `accountId` and `transactionId` both owned by the authenticated user, with at least one of
-`amount`, `date`, or `description` present and valid, the `TransactionController` shall update only
-the field(s) provided, leave any omitted field unchanged, re-derive the owning account's `balance`
-by reversing the transaction's previous `amount` and applying its new `amount`, and respond
-`200 OK` with the updated transaction.
+`amount`, `date`, `description`, or `rawDescription` present and valid, the `TransactionController`
+shall update only the field(s) provided, leave any omitted field unchanged, re-derive the owning
+account's `balance` by reversing the transaction's previous `amount` and applying its new `amount`,
+and respond `200 OK` with the updated transaction.
 
 **Rationale**: `design-decisions.md`'s "Running balance" — editing a transaction must reverse the
 old amount's effect and apply the new one (or an equivalent net-delta calculation), under the same
 concurrency-safety requirement as creation (Requirement 7). This is a genuine partial update
-(`PATCH`, not `PUT`), mirroring `BACKEND-002-AC-17`'s reasoning.
+(`PATCH`, not `PUT`), mirroring `BACKEND-002-AC-17`'s reasoning. `rawDescription` is included here
+as a genuinely editable field — see `design-decisions.md`'s revised "Transaction fields" entry for
+why it's correctable (fixing a mistyped entry) rather than immutable like the account association
+(`BACKEND-003-AC-23`).
 
 #### BACKEND-003-AC-19 [AUTO]: Not-found, not-owned, and cross-account are all indistinguishable
 **Statement**: If `PATCH /api/accounts/{accountId}/transactions/{transactionId}` is requested for
@@ -279,14 +282,16 @@ transaction.
 
 #### BACKEND-003-AC-20 [AUTO]: An update with no fields provided is rejected
 **Statement**: If `PATCH /api/accounts/{accountId}/transactions/{transactionId}` is requested with
-`amount`, `date`, and `description` all absent from the request body, then the
+`amount`, `date`, `description`, and `rawDescription` all absent from the request body, then the
 `TransactionController` shall respond `400 Bad Request` and shall not modify the transaction.
 
-**Rationale**: Direct consequence of `BACKEND-003-AC-18` allowing any subset of the three fields,
+**Rationale**: Direct consequence of `BACKEND-003-AC-18` allowing any subset of the four fields,
 mirroring `BACKEND-002-AC-19a` exactly — enforced via a derived `@AssertTrue`-annotated boolean
 method on `TransactionUpdateRequest`, and also covering a request that supplies exactly one field
 as an explicit JSON `null` (indistinguishable from omitting it once bound), not just a bare `{}`
-body.
+body. A `rawDescription` supplied as a present-but-blank string still counts as "provided" here
+(it's distinguishable from `null` at the record level) — see `BACKEND-003-AC-23a` for what that
+case actually does.
 
 #### BACKEND-003-AC-21 [AUTO]: A present-but-blank description is rejected on update
 **Statement**: If `PATCH /api/accounts/{accountId}/transactions/{transactionId}` is requested with
@@ -318,15 +323,18 @@ field edit). Enforced structurally: `TransactionUpdateRequest` simply has no fie
 association, so this AC's test asserts the association survives unchanged through a request body
 that includes an extra, unrecognised field for it.
 
-#### BACKEND-003-AC-23a [AUTO]: rawDescription is not editable via this endpoint
-**Statement**: When `PATCH /api/accounts/{accountId}/transactions/{transactionId}` is requested
-with a `rawDescription` value present in the request body, the `TransactionController` shall
-ignore it and leave the transaction's `rawDescription` unchanged.
+#### BACKEND-003-AC-23a [AUTO]: A present-but-blank rawDescription clears it to null
+**Statement**: If `PATCH /api/accounts/{accountId}/transactions/{transactionId}` is requested with
+`rawDescription` present in the request body but blank, then the `TransactionController` shall set
+the transaction's `rawDescription` to `null` and respond `200 OK`.
 
-**Rationale**: `design-decisions.md`'s "Transaction fields" — `rawDescription`'s entire value as a
-stable string for the future classification engine to pattern-match against (build order step 3)
-depends on it never changing after creation, the same reasoning `BACKEND-003-AC-23` applies to the
-account association. Enforced structurally: `TransactionUpdateRequest` simply has no field for it.
+**Rationale**: `rawDescription` is nullable (`BACKEND-003-AC-03a`) and editable
+(`BACKEND-003-AC-18`, revised from this field's original immutable-after-creation design — see
+`design-decisions.md`'s "Transaction fields"), so unlike `description`'s blank-is-invalid rule
+(`BACKEND-003-AC-21`), a blank `rawDescription` on update is a legitimate way to explicitly clear a
+previously-captured value, not an error. Distinguishable from omitting the field entirely (which
+leaves it unchanged, per `BACKEND-003-AC-18`) the same way `BACKEND-002-AC-19` already distinguishes
+"present but blank" from "absent" for a different field.
 
 #### BACKEND-003-AC-11g [AUTO]: A supplied-but-invalid accountId is a 400, not a 404 or 500 (update)
 **Statement**: If `PATCH /api/accounts/{accountId}/transactions/{transactionId}` is requested with
@@ -461,7 +469,7 @@ regression-guard role `BACKEND-002-AC-23` served for accounts.
 | `GlobalExceptionHandler` / custom-exception pattern, `AccountNotFoundException` precedent                                       | `backend_spec_002_accounts.md`                                      | This spec (adds a `TransactionNotFoundException` mapped to `404`)                                                                                                          |
 | Malformed/absent id handling (`MethodArgumentTypeMismatchException` → `400`, `NoResourceFoundException`/`MissingPathVariableException` → `404`) | `backend_spec_002_accounts.md` (`BACKEND-002-AC-24a` through `AC-24f`) | This spec (`BACKEND-003-AC-11a..j` for `accountId`, `BACKEND-003-AC-17a..f` for `transactionId` — same handlers, no new code, only new test coverage per path segment per verb) |
 | Running balance decision + concurrency-safety note (pessimistic vs. optimistic locking)                                        | `.claude/02-accounts-and-transactions/design-decisions.md` ("Running balance") | This spec (Requirement 7, `BACKEND-003-AC-26`)                                                                                                                             |
-| Transaction field decisions (signed amount, date ≥ `openedOn`, free-text description, nullable/immutable `rawDescription`, no currency/category column) | `.claude/02-accounts-and-transactions/design-decisions.md` ("Transaction fields") | This spec                                                                                                                                                                   |
+| Transaction field decisions (signed amount, date ≥ `openedOn`, free-text description, nullable/editable `rawDescription`, no currency/category column) | `.claude/02-accounts-and-transactions/design-decisions.md` ("Transaction fields") | This spec                                                                                                                                                                   |
 | Deferred concepts (credit cards, investment/pension accounts, foreign-currency flag, sensitive account identifiers, archiving) | `.claude/02-accounts-and-transactions/spec_candidates.md`            | N/A — confirms these aren't part of this spec                                                                                                                              |
 
 ## Acceptance Criteria Summary
@@ -490,13 +498,13 @@ regression-guard role `BACKEND-002-AC-23` served for accounts.
 - [ ] BACKEND-003-AC-11f [AUTO]: View returns 404 for an absent `accountId`
 - [ ] BACKEND-003-AC-17a [AUTO]: View returns 400 for a supplied-but-invalid `transactionId`
 - [ ] BACKEND-003-AC-17b [AUTO]: View returns 404 for an absent `transactionId`
-- [ ] BACKEND-003-AC-18 [AUTO]: Valid update updates any subset of `amount`/`date`/`description`, returns 200, re-derives balance
+- [ ] BACKEND-003-AC-18 [AUTO]: Valid update updates any subset of `amount`/`date`/`description`/`rawDescription`, returns 200, re-derives balance
 - [ ] BACKEND-003-AC-19 [AUTO]: Update returns 404 uniformly for not-found/not-owned account or cross-account/not-found transaction, no modification
-- [ ] BACKEND-003-AC-20 [AUTO]: Update with all fields absent returns 400, no modification
+- [ ] BACKEND-003-AC-20 [AUTO]: Update with `amount`/`date`/`description`/`rawDescription` all absent returns 400, no modification
 - [ ] BACKEND-003-AC-21 [AUTO]: Present-but-blank `description` on update returns 400, no modification
 - [ ] BACKEND-003-AC-22 [AUTO]: Present-but-too-early `date` on update returns 400, no modification
 - [ ] BACKEND-003-AC-23 [AUTO]: Account association is not editable via the update endpoint
-- [ ] BACKEND-003-AC-23a [AUTO]: `rawDescription` is not editable via the update endpoint
+- [ ] BACKEND-003-AC-23a [AUTO]: A present-but-blank `rawDescription` on update clears it to `null`
 - [ ] BACKEND-003-AC-11g [AUTO]: Update returns 400 for a supplied-but-invalid `accountId`, no modification
 - [ ] BACKEND-003-AC-11h [AUTO]: Update returns 404 for an absent `accountId`, no modification
 - [ ] BACKEND-003-AC-17c [AUTO]: Update returns 400 for a supplied-but-invalid `transactionId`, no modification
@@ -776,8 +784,8 @@ def "BACKEND-003-AC-17b: returns 404 for an absent transactionId on view"() {
 ```
 
 ```groovy
-def "BACKEND-003-AC-18: updates an owned transaction's amount, date, or description and re-derives the balance"() {
-    given: "a transaction owned (via its account) by the authenticated user, and an update request with at least one of amount, date, or description present"
+def "BACKEND-003-AC-18: updates an owned transaction's amount, date, description, or rawDescription and re-derives the balance"() {
+    given: "a transaction owned (via its account) by the authenticated user, and an update request with at least one of amount, date, description, or rawDescription present"
 
     when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested with those ids"
 
@@ -803,7 +811,7 @@ def "BACKEND-003-AC-19: returns 404 uniformly for not-found/not-owned account or
 
 ```groovy
 def "BACKEND-003-AC-20: rejects an update with no fields provided"() {
-    given: "a transaction owned by the authenticated user and an update request with amount, date, and description all absent"
+    given: "a transaction owned by the authenticated user and an update request with amount, date, description, and rawDescription all absent"
 
     when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested"
 
@@ -850,14 +858,14 @@ def "BACKEND-003-AC-23: leaves the account association unchanged on update"() {
 ```
 
 ```groovy
-def "BACKEND-003-AC-23a: leaves rawDescription unchanged on update"() {
-    given: "a transaction owned by the authenticated user and an update request body that also includes a rawDescription value"
+def "BACKEND-003-AC-23a: clears rawDescription to null when present but blank on update"() {
+    given: "a transaction owned by the authenticated user with a previously-set rawDescription, and an update request where rawDescription is present but blank"
 
     when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested"
 
     then: "the response is 200 OK"
 
-    and: "the transaction's rawDescription is unchanged from before the request"
+    and: "the transaction's rawDescription is null"
 }
 ```
 

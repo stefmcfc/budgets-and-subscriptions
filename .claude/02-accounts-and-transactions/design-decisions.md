@@ -119,19 +119,30 @@ requirement as creation above.
   separate structured "merchant" field in this stage — Q6/Q7's classification engine (build order
   step 3) is what will eventually need to parse/match against description text for pattern
   detection, but that's a step-3 concern, not this one's.
-- **`rawDescription`** (nullable, free text) — the transaction description exactly as it appeared
-  on a bank statement/import, captured once at creation and never editable afterward. Added during
-  `backend_spec_003`'s own design pass (not part of the original stage-2 field list above), raised
-  because a real bank statement line is often a poor merchant label on its own (a payment
-  processor's name, an alternate trading name, or a sole trader's personal name rather than the
-  business the user actually recognises) — `description` is where the user's own, readable label
-  lives, and `rawDescription` preserves the original text underneath it. The concrete payoff is for
-  step 3's classification engine: matching against `rawDescription` gives it a stable string that
-  doesn't drift as the user renames `description` over time, whereas matching against `description`
-  alone would mean every rename risks breaking an existing pattern match. Nullable because this
-  stage's only entry path is manual creation (no bank-feed import exists yet), so there's often
-  nothing genuine to put here yet — the column exists so the data has somewhere to land once an
-  import path is built, without a schema change at that point.
+- **`rawDescription`** (nullable, free text, editable) — the transaction description exactly as it
+  appeared on a bank statement/import. Added during `backend_spec_003`'s own design pass (not part
+  of the original stage-2 field list above), raised because a real bank statement line is often a
+  poor merchant label on its own (a payment processor's name, an alternate trading name, or a sole
+  trader's personal name rather than the business the user actually recognises) — `description` is
+  where the user's own, readable label lives, and `rawDescription` preserves the original text
+  underneath it. The concrete payoff is for step 3's classification engine: matching against
+  `rawDescription` gives it a stable string that doesn't drift the way `description` might as the
+  user restyles it over time.
+  - **Editable via `PATCH`** — revised from this field's original "immutable after creation" design.
+    This stage's only entry path is manual typing (no bank-feed import exists yet), so a
+    transcription mistake is an ordinary thing to need to fix, and forcing a delete-and-recreate of
+    the whole transaction just to correct a typo is a disproportionate cost. This is a different
+    kind of edit from `description`'s free-form restyling, though: `rawDescription` is meant to stay
+    a faithful transcription of the source text, not a personalised label, so an edit here reads as
+    "fixing what I typed," not "renaming what I call it" — the classification-matching payoff above
+    still holds for genuine corrections, just not for the kind of casual renaming `description`
+    invites.
+  - **A present-but-blank value on update clears it to `null`** — meaningful for a nullable field,
+    distinct from a required field's blank-is-invalid rule (`description`'s own `AC-21`). See
+    `backend_spec_003`'s `AC-23a`.
+  - **Nullable** because this stage's only entry path is manual creation, so there's often nothing
+    genuine to put here yet — the column exists so the data has somewhere to land once a bank-feed
+    import path is built later, without a schema change at that point.
 - **Account** — every `Transaction` belongs to exactly one `Account` (FK). `Transaction` has **no
   separate owner column of its own** — ownership is transitive through its `Account`, so an
   authorisation check only ever needs to confirm "does the current user own this transaction's

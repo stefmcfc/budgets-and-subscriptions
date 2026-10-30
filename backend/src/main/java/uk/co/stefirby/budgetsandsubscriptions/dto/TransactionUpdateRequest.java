@@ -6,6 +6,7 @@ import java.time.LocalDate;
 public record TransactionUpdateRequest(
         BigDecimal amount,
         LocalDate date,
-        String description
+        String description,
+        String rawDescription
 ) {
 }

@@ -174,8 +174,8 @@ class TransactionControllerSpec extends Specification {
     // PATCH /api/accounts/{accountId}/transactions/{transactionId} tests
     //=================================
 
-    def "BACKEND-003-AC-18: updates an owned transaction's amount, date, or description and re-derives the balance"() {
-        given: "a transaction owned (via its account) by the authenticated user, and an update request with at least one of amount, date, or description present"
+    def "BACKEND-003-AC-18: updates an owned transaction's amount, date, description, or rawDescription and re-derives the balance"() {
+        given: "a transaction owned (via its account) by the authenticated user, and an update request with at least one of amount, date, description, or rawDescription present"
 
         when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested with those ids"
 
@@ -197,7 +197,7 @@ class TransactionControllerSpec extends Specification {
     }
 
     def "BACKEND-003-AC-20: rejects an update with no fields provided"() {
-        given: "a transaction owned by the authenticated user and an update request with amount, date, and description all absent"
+        given: "a transaction owned by the authenticated user and an update request with amount, date, description, and rawDescription all absent"
 
         when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested"
 
@@ -236,14 +236,14 @@ class TransactionControllerSpec extends Specification {
         and: "the transaction's owning account is unchanged from before the request"
     }
 
-    def "BACKEND-003-AC-23a: leaves rawDescription unchanged on update"() {
-        given: "a transaction owned by the authenticated user and an update request body that also includes a rawDescription value"
+    def "BACKEND-003-AC-23a: clears rawDescription to null when present but blank on update"() {
+        given: "a transaction owned by the authenticated user with a previously-set rawDescription, and an update request where rawDescription is present but blank"
 
         when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested"
 
         then: "the response is 200 OK"
 
-        and: "the transaction's rawDescription is unchanged from before the request"
+        and: "the transaction's rawDescription is null"
     }
 
     def "BACKEND-003-AC-11g: returns 400 for a supplied-but-invalid accountId on update"() {
