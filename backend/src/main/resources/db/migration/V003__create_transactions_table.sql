@@ -1,3 +1,12 @@
--- Scaffolded placeholder (backend_spec_003_transactions.md). Real DDL for the `transactions`
--- table (columns, FK to accounts, constraints matching the Transaction entity's JPA mapping per
--- BACKEND-003-AC-05) is the human's to write here.
+CREATE TABLE transactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL,
+    amount NUMERIC(19, 2) NOT NULL,
+    date date NOT NULL,
+    description VARCHAR(255) NOT NULL,
+    raw_description VARCHAR(255),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT fk_transactions_account FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+CREATE INDEX idx_transactions_account ON transactions(account_id);
