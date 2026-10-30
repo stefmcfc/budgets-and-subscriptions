@@ -1,6 +1,6 @@
 # Accounts (Backend)
 
-**Status**: In progress (AC-01 through AC-20, AC-24a through AC-24d done, 2026-10-27)
+**Status**: Done (all ACs, 2026-10-30)
 **Priority**: P1 — first spec of build order step 2 ("Accounts and transactions"); every
 account-scoped feature (transactions, spending insights, multi-person balances) depends on an
 `Account` existing to attach to.
@@ -401,15 +401,15 @@ AC exists as a tested regression guard for that default, not to introduce new fi
 - [x] BACKEND-002-AC-19a [AUTO]: Update with `bankName`, `accountName`, and `type` all absent returns 400, no modification
 - [x] BACKEND-002-AC-19b [AUTO]: A present-but-unrecognised `type` value on update returns 400, no modification
 - [x] BACKEND-002-AC-20 [AUTO]: `openingBalance`/`openedOn`/`balance` are not modifiable via the update endpoint
-- [ ] BACKEND-002-AC-21 [AUTO]: `DELETE /api/accounts/{id}` deletes an owned account, 204
-- [ ] BACKEND-002-AC-22 [AUTO]: `DELETE /api/accounts/{id}` returns 404 uniformly for not-found and not-owned
-- [ ] BACKEND-002-AC-23 [AUTO]: Unauthenticated requests to any `/api/accounts` route are rejected 401 before the controller runs
+- [x] BACKEND-002-AC-21 [AUTO]: `DELETE /api/accounts/{id}` deletes an owned account, 204
+- [x] BACKEND-002-AC-22 [AUTO]: `DELETE /api/accounts/{id}` returns 404 uniformly for not-found and not-owned
+- [x] BACKEND-002-AC-23 [AUTO]: Unauthenticated requests to any `/api/accounts` route are rejected 401 before the controller runs
 - [x] BACKEND-002-AC-24a [AUTO]: `GET /api/accounts/{id}` with a supplied-but-invalid (non-UUID) id returns 400, not 404 or 500
 - [x] BACKEND-002-AC-24b [AUTO]: `GET /api/accounts/{id}` with an absent (empty/blank) id returns 404, not 400 or 500
 - [x] BACKEND-002-AC-24c [AUTO]: `PATCH /api/accounts/{id}` with a supplied-but-invalid (non-UUID) id returns 400, not 404 or 500, no modification
 - [x] BACKEND-002-AC-24d [AUTO]: `PATCH /api/accounts/{id}` with an absent (empty/blank) id returns 404, not 400 or 500, no modification
-- [ ] BACKEND-002-AC-24e [AUTO]: `DELETE /api/accounts/{id}` with a supplied-but-invalid (non-UUID) id returns 400, not 404 or 500, no deletion
-- [ ] BACKEND-002-AC-24f [AUTO]: `DELETE /api/accounts/{id}` with an absent (empty/blank) id returns 404, not 400 or 500, no deletion
+- [x] BACKEND-002-AC-24e [AUTO]: `DELETE /api/accounts/{id}` with a supplied-but-invalid (non-UUID) id returns 400, not 404 or 500, no deletion
+- [x] BACKEND-002-AC-24f [AUTO]: `DELETE /api/accounts/{id}` with an absent (empty/blank) id returns 404, not 400 or 500, no deletion
 
 ## Test case sketches
 

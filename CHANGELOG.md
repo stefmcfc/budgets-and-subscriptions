@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `DELETE /api/accounts/{id}`: deletes an owned account and responds `204` (`BACKEND-002-AC-21`).
+  Returns `404` uniformly for a non-existent or non-owned account, same as the other
+  `/api/accounts/{id}` endpoints (`AC-22`), reusing the existing malformed/absent-id handling
+  (`AC-24e`, `AC-24f`). Extended the `BACKEND-002-AC-23` unauthenticated-request regression guard
+  to cover all five `/api/accounts` endpoints, not just the one it was originally written against.
+
 ## [0.9.0] - 2026-10-27
 
 ### Added

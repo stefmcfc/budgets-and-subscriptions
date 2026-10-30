@@ -190,4 +190,48 @@ class AccountServiceDataJpaSpec extends Specification {
             response.balance() == createdAccount.balance
 
     }
+
+    //----------------------
+    // deleteAccount tests
+    //======================
+
+    def "BACKEND-002-AC-21: deletes an owned account"() {
+        given: "an account owned by the authenticated user"
+            UUID userId = createUser(userRepository)
+            UUID userAccount1 = createAccount1(userId, accountRepository)
+
+        when: "deleteAccount is requested with that account's id"
+            accountService.deleteAccount(userId.toString(), userAccount1)
+
+        then: "the account no longer exists"
+            accountRepository.findByIdAndUserId(userAccount1, userId) == Optional.empty()
+    }
+
+    def "BACKEND-002-AC-22: throws AccountNotFound for a non-owned account on delete"() {
+        given: "an account id owned by a different user"
+            UUID user1 = createUser(userRepository)
+
+            UUID user2 = createUser2(userRepository)
+            UUID user2Account1 = createAccount1(user2, accountRepository)
+
+        when: "deleteAccount called by user1 for an account belonging to user2"
+            accountService.deleteAccount(user1.toString(), user2Account1)
+
+        then: "AccountNotFound is thrown"
+            thrown(AccountNotFoundException)
+
+        and: "that account is not deleted"
+            accountRepository.findByIdAndUserId(user2Account1, user2) != Optional.empty()
+    }
+
+    def "BACKEND-002-AC-22: throws Account not found for a non-existent  account on delete"() {
+        given: "a non-existent account id"
+            UUID user = createUser(userRepository)
+
+        when: "deleteAccount called by user1 for an non-existent account"
+            accountService.deleteAccount(user.toString(), UUID.randomUUID())
+
+        then: "AccountNotFound is thrown"
+            thrown(AccountNotFoundException)
+    }
 }

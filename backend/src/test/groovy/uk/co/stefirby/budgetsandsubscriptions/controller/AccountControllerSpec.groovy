@@ -3,6 +3,7 @@ package uk.co.stefirby.budgetsandsubscriptions.controller
 import jakarta.servlet.http.Cookie
 import uk.co.stefirby.budgetsandsubscriptions.dto.AccountUpdateRequest
 import uk.co.stefirby.budgetsandsubscriptions.exception.AccountNotFoundException
+import uk.co.stefirby.budgetsandsubscriptions.exception.JwtParserException
 
 import java.time.Clock
 import java.time.LocalDate
@@ -24,6 +25,7 @@ import uk.co.stefirby.budgetsandsubscriptions.security.SecurityConfig
 import uk.co.stefirby.budgetsandsubscriptions.security.util.JwtHelper
 import uk.co.stefirby.budgetsandsubscriptions.service.AccountService
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
@@ -31,12 +33,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static uk.co.stefirby.budgetsandsubscriptions.common.Constants.COOKIE_ACCESS_TOKEN
 import static uk.co.stefirby.budgetsandsubscriptions.common.TestConstants.ROLE_USER
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountConstants.*
+import static uk.co.stefirby.budgetsandsubscriptions.security.util.CookieHelper.accessTokenCookie
 
 @WebMvcTest(controllers = AccountController)
 @Import(SecurityConfig)
 class AccountControllerSpec extends Specification {
 
     private static final String ENDPOINT_ACCOUNTS = "/api/accounts"
+
+    private static AccountCreateRequest ACCOUNT_CREATE_REQUEST = new AccountCreateRequest(
+        ACCOUNT_BANK_NAME, ACCOUNT_ACCOUNT_NAME, AccountType.CURRENT, ACCOUNT_OPENING_BALANCE, ACCOUNT_OPENED_ON)
 
     private static AccountResponse ACCOUNT_RESPONSE_1 = new AccountResponse(UUID.randomUUID(), ACCOUNT_BANK_NAME,
         ACCOUNT_ACCOUNT_NAME, AccountType.CURRENT, ACCOUNT_OPENING_BALANCE, ACCOUNT_OPENED_ON, ACCOUNT_OPENING_BALANCE)
@@ -81,8 +87,7 @@ class AccountControllerSpec extends Specification {
         given: "an authenticated user and a valid account creation request"
             AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
 
-            AccountCreateRequest accountCreateRequest = new AccountCreateRequest(
-                ACCOUNT_BANK_NAME, ACCOUNT_ACCOUNT_NAME, AccountType.CURRENT, ACCOUNT_OPENING_BALANCE, ACCOUNT_OPENED_ON)
+            AccountCreateRequest accountCreateRequest = ACCOUNT_CREATE_REQUEST
 
         when: "POST /api/accounts is requested"
             def body = objectMapper.writeValueAsString(accountCreateRequest)
@@ -107,8 +112,7 @@ class AccountControllerSpec extends Specification {
         given: "an authenticated user and a creation request body containing a different user's id as owner"
             AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
 
-            AccountCreateRequest accountCreateRequest = new AccountCreateRequest(
-                ACCOUNT_BANK_NAME, ACCOUNT_ACCOUNT_NAME, AccountType.CURRENT, ACCOUNT_OPENING_BALANCE, ACCOUNT_OPENED_ON)
+            AccountCreateRequest accountCreateRequest = ACCOUNT_CREATE_REQUEST
 
         when: "POST /api/accounts is requested"
             UUID differentUuid = UUID.randomUUID()
@@ -608,35 +612,239 @@ class AccountControllerSpec extends Specification {
 
     def "BACKEND-002-AC-21: deletes an owned account"() {
         given: "an account owned by the authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
 
         when: "DELETE /api/accounts/{id} is requested with that account's id"
+            def result = mockMvc.perform(delete(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt)))
 
         then: "the response is 204 No Content"
+            noExceptionThrown()
+            result.andExpect(status().isNoContent())
 
-        and: "the account no longer exists"
+        and: "the service got called with the authenticated user"
+            1 * mockAccountService.deleteAccount(user.id.toString(), accountId) >> {}
     }
 
     def "BACKEND-002-AC-22: returns 404 uniformly for a non-existent or non-owned account on delete"() {
         given: "either a non-existent account id, or an account id owned by a different user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
 
         when: "DELETE /api/accounts/{id} is requested with that id"
+            def result = mockMvc.perform(delete(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt)))
 
         then: "the response is 404 Not Found in both cases"
+            result.andExpect(status().isNotFound())
+
+        and: "the service got called with the authenticated user"
+            1 * mockAccountService.deleteAccount(user.id.toString(), accountId)  >>
+                { throw new AccountNotFoundException("Account not found") }
+    }
+
+    @Unroll
+    def "BACKEND-002-AC-24e: returns 400 for a supplied-but-invalid (non-UUID) id on delete"() {
+        given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+
+        when: "DELETE /api/accounts/{id} is requested with an id that is the string \"null\" or not a UUID"
+            def result = mockMvc.perform(delete(ENDPOINT_ACCOUNTS + "/" + accountId)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt)))
+
+        then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
 
         and: "no account is deleted"
+            0 * mockAccountService.deleteAccount(_ as String, _ as UUID)
+
+        where:
+            scenario   | accountId
+            "null"     | null
+            "non-uuid" | "not a uuid"
+    }
+
+    @Unroll
+    def "BACKEND-002-AC-24f: returns 404 for an absent (empty or blank) id on delete"() {
+        given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+
+        when: "DELETE /api/accounts/{id} is requested with an id that is empty or blank"
+            def result = mockMvc.perform(delete(ENDPOINT_ACCOUNTS + "/" + accountId)
+                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt)))
+
+        then: "the response is 404 Not Found"
+            result.andExpect(status().isNotFound())
+
+        and: "no account is deleted"
+            0 * mockAccountService.deleteAccount(_ as String, _ as UUID)
+
+        where:
+            scenario     | accountId
+            "empty"      | ""
+            "blank"      | "     "
     }
 
     //---------------------------------
     // Authentication regression guard
     //=================================
 
-    def "BACKEND-002-AC-23: rejects an unauthenticated request before the controller runs"() {
+    @Unroll
+    def "BACKEND-002-AC-23: CREATE ACCOUNT - rejects an unauthenticated request before the controller runs - #scenario"() {
         given: "a request to an /api/accounts endpoint with no valid access-token cookie"
+            AccountCreateRequest accountCreateRequest = ACCOUNT_CREATE_REQUEST
+
+            if (cookie != null) {
+                mockJwtService.getClaim(_ as String) >> { throw new JwtParserException(exceptionMessage) }
+            }
 
         when: "the request is made"
+            def body = objectMapper.writeValueAsString(accountCreateRequest)
+            def mvcRequest = post(ENDPOINT_ACCOUNTS)
+                .contentType("application/json")
+                .content(body)
+
+            if (cookie != null) {
+                mvcRequest = mvcRequest.cookie(accessTokenCookie(cookie))
+            }
+
+            def result = mockMvc.perform(mvcRequest)
 
         then: "the response is 401 Unauthorized"
+            result.andExpect(status().isUnauthorized())
 
         and: "AccountController is never invoked"
+            0 * mockAccountService.createAccount(_ as String, _ as AccountCreateRequest)
+
+        where:
+            scenario           | cookie           | exceptionMessage
+            "no cookie"        | null             | "no cookie"
+            "malformed cookie" | "bad cookie"     | "bad token"
+            "expired cookie"   | "expired cookie" | "expired token"
+    }
+
+    @Unroll
+    def "BACKEND-002-AC-23: GET ACCOUNTS - rejects an unauthenticated request before the controller runs - #scenario"() {
+        given: "a request to an /api/accounts endpoint with no valid access-token cookie"
+            if (cookie != null) {
+                mockJwtService.getClaim(_ as String) >> { throw new JwtParserException(exceptionMessage) }
+            }
+
+        when: "the request is made"
+            def mvcRequest = get(ENDPOINT_ACCOUNTS)
+                .contentType("application/json")
+
+            if (cookie != null) {
+                mvcRequest = mvcRequest.cookie(accessTokenCookie(cookie))
+            }
+
+            def result = mockMvc.perform(mvcRequest)
+
+        then: "the response is 401 Unauthorized"
+            result.andExpect(status().isUnauthorized())
+
+        and: "AccountController is never invoked"
+            0 * mockAccountService.getAccounts(_ as String)
+
+        where:
+            scenario           | cookie           | exceptionMessage
+            "no cookie"        | null             | "no cookie"
+            "malformed cookie" | "bad cookie"     | "bad token"
+            "expired cookie"   | "expired cookie" | "expired token"
+    }
+
+    @Unroll
+    def "BACKEND-002-AC-23: GET ACCOUNT - rejects an unauthenticated request before the controller runs - #scenario"() {
+        given: "a request to an /api/accounts endpoint with no valid access-token cookie"
+            if (cookie != null) {
+                mockJwtService.getClaim(_ as String) >> { throw new JwtParserException(exceptionMessage) }
+            }
+
+        when: "the request is made"
+            def mvcRequest = get(ENDPOINT_ACCOUNTS + "/" + UUID.randomUUID().toString())
+                .contentType("application/json")
+
+            if (cookie != null) {
+                mvcRequest = mvcRequest.cookie(accessTokenCookie(cookie))
+            }
+
+            def result = mockMvc.perform(mvcRequest)
+
+        then: "the response is 401 Unauthorized"
+            result.andExpect(status().isUnauthorized())
+
+        and: "AccountController is never invoked"
+            0 * mockAccountService.getAccount(_ as String, _ as UUID)
+
+        where:
+            scenario           | cookie           | exceptionMessage
+            "no cookie"        | null             | "no cookie"
+            "malformed cookie" | "bad cookie"     | "bad token"
+            "expired cookie"   | "expired cookie" | "expired token"
+    }
+
+    @Unroll
+    def "BACKEND-002-AC-23: UPDATE ACCOUNT - rejects an unauthenticated request before the controller runs - #scenario"() {
+        given: "a request to an /api/accounts endpoint with no valid access-token cookie"
+            AccountUpdateRequest accountUpdateRequest = ACCOUNT_UPDATE_REQUEST
+
+            if (cookie != null) {
+                mockJwtService.getClaim(_ as String) >> { throw new JwtParserException(exceptionMessage) }
+            }
+
+        when: "the request is made"
+            def body = objectMapper.writeValueAsString(accountUpdateRequest)
+            def mvcRequest = patch(ENDPOINT_ACCOUNTS + "/" + UUID.randomUUID().toString())
+                .contentType("application/json")
+                .content(body)
+
+            if (cookie != null) {
+                mvcRequest = mvcRequest.cookie(accessTokenCookie(cookie))
+            }
+
+            def result = mockMvc.perform(mvcRequest)
+
+        then: "the response is 401 Unauthorized"
+            result.andExpect(status().isUnauthorized())
+
+        and: "AccountController is never invoked"
+            0 * mockAccountService.updateAccount(_ as String, _ as UUID, _ as AccountUpdateRequest)
+
+        where:
+            scenario           | cookie           | exceptionMessage
+            "no cookie"        | null             | "no cookie"
+            "malformed cookie" | "bad cookie"     | "bad token"
+            "expired cookie"   | "expired cookie" | "expired token"
+    }
+
+    @Unroll
+    def "BACKEND-002-AC-23: DELETE ACCOUNT - rejects an unauthenticated request before the controller runs - #scenario"() {
+        given: "a request to an /api/accounts endpoint with no valid access-token cookie"
+            if (cookie != null) {
+                mockJwtService.getClaim(_ as String) >> { throw new JwtParserException(exceptionMessage) }
+            }
+
+        when: "the request is made"
+            def mvcRequest = delete(ENDPOINT_ACCOUNTS + "/" + UUID.randomUUID().toString())
+                .contentType("application/json")
+
+            if (cookie != null) {
+                mvcRequest = mvcRequest.cookie(accessTokenCookie(cookie))
+            }
+
+            def result = mockMvc.perform(mvcRequest)
+
+        then: "the response is 401 Unauthorized"
+            result.andExpect(status().isUnauthorized())
+
+        and: "AccountController is never invoked"
+            0 * mockAccountService.deleteAccount(_ as String, _ as UUID)
+
+        where:
+            scenario           | cookie           | exceptionMessage
+            "no cookie"        | null             | "no cookie"
+            "malformed cookie" | "bad cookie"     | "bad token"
+            "expired cookie"   | "expired cookie" | "expired token"
     }
 }
