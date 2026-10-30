@@ -8,6 +8,7 @@ public record TransactionResponse(
         UUID id,
         BigDecimal amount,
         LocalDate date,
-        String description
+        String description,
+        String rawDescription
 ) {
 }

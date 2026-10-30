@@ -236,6 +236,16 @@ class TransactionControllerSpec extends Specification {
         and: "the transaction's owning account is unchanged from before the request"
     }
 
+    def "BACKEND-003-AC-23a: leaves rawDescription unchanged on update"() {
+        given: "a transaction owned by the authenticated user and an update request body that also includes a rawDescription value"
+
+        when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested"
+
+        then: "the response is 200 OK"
+
+        and: "the transaction's rawDescription is unchanged from before the request"
+    }
+
     def "BACKEND-003-AC-11g: returns 400 for a supplied-but-invalid accountId on update"() {
         given: "an authenticated user"
 

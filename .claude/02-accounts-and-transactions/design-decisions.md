@@ -115,9 +115,23 @@ requirement as creation above.
   itself (Q10) — this decision is only about sign convention.
 - **`date`** — when the transaction occurred (not when it was entered into the app). Must be on or
   after the owning `Account`'s `openedOn` date (see "Account fields" above).
-- **`description`** — free text (merchant/payee/note). No separate structured "merchant" field in
-  this stage — Q6/Q7's classification engine (build order step 3) is what will eventually need to
-  parse/match against this text for pattern detection, but that's a step-3 concern, not this one's.
+- **`description`** — free text (merchant/payee/note), user-facing and editable at any time. No
+  separate structured "merchant" field in this stage — Q6/Q7's classification engine (build order
+  step 3) is what will eventually need to parse/match against description text for pattern
+  detection, but that's a step-3 concern, not this one's.
+- **`rawDescription`** (nullable, free text) — the transaction description exactly as it appeared
+  on a bank statement/import, captured once at creation and never editable afterward. Added during
+  `backend_spec_003`'s own design pass (not part of the original stage-2 field list above), raised
+  because a real bank statement line is often a poor merchant label on its own (a payment
+  processor's name, an alternate trading name, or a sole trader's personal name rather than the
+  business the user actually recognises) — `description` is where the user's own, readable label
+  lives, and `rawDescription` preserves the original text underneath it. The concrete payoff is for
+  step 3's classification engine: matching against `rawDescription` gives it a stable string that
+  doesn't drift as the user renames `description` over time, whereas matching against `description`
+  alone would mean every rename risks breaking an existing pattern match. Nullable because this
+  stage's only entry path is manual creation (no bank-feed import exists yet), so there's often
+  nothing genuine to put here yet — the column exists so the data has somewhere to land once an
+  import path is built, without a schema change at that point.
 - **Account** — every `Transaction` belongs to exactly one `Account` (FK). `Transaction` has **no
   separate owner column of its own** — ownership is transitive through its `Account`, so an
   authorisation check only ever needs to confirm "does the current user own this transaction's

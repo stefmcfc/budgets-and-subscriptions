@@ -36,6 +36,14 @@ class TransactionSpec extends Specification {
         then: "persistence fails validation"
     }
 
+    def "BACKEND-003-AC-03a: accepts a null rawDescription"() {
+        given: "a new Transaction with a null rawDescription"
+
+        when: "the transaction is persisted"
+
+        then: "persistence succeeds"
+    }
+
     def "BACKEND-003-AC-04: rejects persistence with no owning account set"() {
         given: "a new Transaction with no Account set"
 
