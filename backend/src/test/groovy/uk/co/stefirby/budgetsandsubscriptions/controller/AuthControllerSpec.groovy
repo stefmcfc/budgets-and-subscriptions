@@ -33,6 +33,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import static uk.co.stefirby.budgetsandsubscriptions.common.Constants.COOKIE_ACCESS_TOKEN
 import static uk.co.stefirby.budgetsandsubscriptions.common.TestConstants.ROLE_USER
+import static uk.co.stefirby.budgetsandsubscriptions.security.util.CookieHelper.accessTokenCookie
 
 @WebMvcTest(controllers = AuthController)
 @Import(SecurityConfig)
@@ -386,7 +387,7 @@ class AuthControllerSpec extends Specification {
                 result = mockMvc.perform(get(ENDPOINT_GET_CURRENT_USER))
             } else {
                 result = mockMvc.perform(get(ENDPOINT_GET_CURRENT_USER)
-                    .cookie(new Cookie(COOKIE_ACCESS_TOKEN, cookie)))
+                    .cookie(accessTokenCookie(cookie)))
             }
 
         then: "the response is 401 Unauthorized"

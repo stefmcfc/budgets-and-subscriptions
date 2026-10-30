@@ -73,6 +73,14 @@ public class AccountService {
         return mapAccountToAccountResponse(accountRepository.saveAndFlush(userAccount));
     }
 
+    @Transactional
+    public void deleteAccount(String userId, UUID accountId) {
+        // first make sure that the account belongs to the owner
+        Account userAccount = getAccountForUser(UUID.fromString(userId), accountId);
+
+        accountRepository.delete(userAccount);
+    }
+
     //------------------
     // private methods
     //==================

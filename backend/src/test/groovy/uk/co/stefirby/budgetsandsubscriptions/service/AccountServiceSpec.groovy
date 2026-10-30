@@ -56,6 +56,10 @@ class AccountServiceSpec extends Specification {
         )
     }
 
+    //----------------------
+    // createAccount tests
+    //======================
+
     def "BACKEND-002-AC-07: given user and valid accountCreateRequest then createAccount creates account"() {
         given: "valid user with UUID format"
             UUID uuid = UUID.randomUUID()
@@ -81,6 +85,10 @@ class AccountServiceSpec extends Specification {
         and: "the created account's balance equals the given openingBalance"
             response.balance() == ACCOUNT_OPENING_BALANCE
     }
+
+    //----------------------
+    // getAccounts tests
+    //======================
 
     def "BACKEND-002-AC-13: lists only the authenticated user's own accounts"() {
         given: "valid user with uuid format who has 2 accounts"
@@ -112,6 +120,10 @@ class AccountServiceSpec extends Specification {
             response.size() == 0
     }
 
+    //----------------------
+    // getAccount tests
+    //======================
+
     def "BACKEND-002-AC-15: returns a single owned account"() {
         given: "valid user with uuid format who has an account"
             UUID userId = UUID.randomUUID()
@@ -124,6 +136,10 @@ class AccountServiceSpec extends Specification {
         then: "response is returned"
             response.accountName() == ACCOUNT_ACCOUNT_NAME
     }
+
+    //----------------------
+    // updateAccount tests
+    //======================
 
     @Unroll
     def "BACKEND-002-AC-17: updates an owned account's bank name, account name, or type - #scenario"() {
@@ -153,5 +169,26 @@ class AccountServiceSpec extends Specification {
             "accountName only" | null            | "New Account Name" | null
             "accountType only" | null            | null               | AccountType.CASH_ISA
             "all 3 fields"     | "New Bank Name" | "New Account Name" | AccountType.CASH_ISA
+    }
+
+    //----------------------
+    // deleteAccount tests
+    //======================
+
+    def "BACKEND-002-AC-21: deletes an owned account"() {
+        given: "an account owned by the authenticated user"
+            UUID userId = UUID.randomUUID()
+            UUID accountId = UUID.randomUUID()
+            Account account = buildAccount1(userId)
+            mockAccountRepository.findByIdAndUserId(accountId, userId) >> Optional.of(account)
+
+        when: "deleteAccount is called"
+            accountService.deleteAccount(userId.toString(), accountId)
+
+        then: "delete is called"
+            1 * mockAccountRepository.delete(account)
+
+        and: "no exception thrown"
+            noExceptionThrown()
     }
 }
