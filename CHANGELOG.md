@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-03
+
+### Added
+- `POST /api/accounts/{accountId}/transactions`: creates a transaction against an owned account
+  and responds `201` with the created transaction (`BACKEND-003-AC-06`). Returns `404` uniformly
+  for a non-existent or non-owned account (`AC-07`). Rejects a missing/non-numeric `amount`
+  (`AC-08`), a missing/blank `description` (`AC-09`), and a missing or too-early `date` (`AC-10`,
+  the latter checked against the owning account's `openedOn`). Reuses the existing
+  malformed/absent-`accountId` handling from `backend_spec_002_accounts.md` (`AC-11a`, `AC-11b`).
+  `balance`-mutation and the remaining list/view/update/delete endpoints are not yet implemented.
+
 ## [0.10.0] - 2026-10-30
 
 ### Added

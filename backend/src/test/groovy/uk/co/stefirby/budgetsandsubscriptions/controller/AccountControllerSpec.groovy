@@ -1,43 +1,28 @@
 package uk.co.stefirby.budgetsandsubscriptions.controller
 
-import jakarta.servlet.http.Cookie
+import org.spockframework.spring.SpringBean
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
+import org.springframework.context.annotation.Import
+import spock.lang.Unroll
+import uk.co.stefirby.budgetsandsubscriptions.dto.AccountCreateRequest
+import uk.co.stefirby.budgetsandsubscriptions.dto.AccountResponse
 import uk.co.stefirby.budgetsandsubscriptions.dto.AccountUpdateRequest
 import uk.co.stefirby.budgetsandsubscriptions.exception.AccountNotFoundException
-import uk.co.stefirby.budgetsandsubscriptions.exception.JwtParserException
+import uk.co.stefirby.budgetsandsubscriptions.model.AccountType
+import uk.co.stefirby.budgetsandsubscriptions.security.SecurityConfig
+import uk.co.stefirby.budgetsandsubscriptions.service.AccountService
 
 import java.time.Clock
 import java.time.LocalDate
-import org.spockframework.spring.SpringBean
-import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
-import org.springframework.context.annotation.Import
-import org.springframework.test.web.servlet.MockMvc
-import spock.lang.Shared
-import spock.lang.Specification
-import spock.lang.Unroll
-import tools.jackson.databind.ObjectMapper
-import uk.co.stefirby.budgetsandsubscriptions.dto.AccountCreateRequest
-import uk.co.stefirby.budgetsandsubscriptions.dto.AccountResponse
-import uk.co.stefirby.budgetsandsubscriptions.dto.JwtClaim
-import uk.co.stefirby.budgetsandsubscriptions.model.AccountType
-import uk.co.stefirby.budgetsandsubscriptions.security.JwtService
-import uk.co.stefirby.budgetsandsubscriptions.security.SecurityConfig
-import uk.co.stefirby.budgetsandsubscriptions.security.util.JwtHelper
-import uk.co.stefirby.budgetsandsubscriptions.service.AccountService
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
-import static uk.co.stefirby.budgetsandsubscriptions.common.Constants.COOKIE_ACCESS_TOKEN
-import static uk.co.stefirby.budgetsandsubscriptions.common.TestConstants.ROLE_USER
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountConstants.*
 import static uk.co.stefirby.budgetsandsubscriptions.security.util.CookieHelper.accessTokenCookie
 
 @WebMvcTest(controllers = AccountController)
 @Import(SecurityConfig)
-class AccountControllerSpec extends Specification {
+class AccountControllerSpec extends BaseControllerSpec {
 
     private static final String ENDPOINT_ACCOUNTS = "/api/accounts"
 
@@ -52,32 +37,8 @@ class AccountControllerSpec extends Specification {
     private static final AccountUpdateRequest ACCOUNT_UPDATE_REQUEST = new AccountUpdateRequest(
         ACCOUNT_BANK_NAME_1, ACCOUNT_ACCOUNT_NAME_1, AccountType.SAVINGS)
 
-    @Autowired
-    MockMvc mockMvc
-
-    @Autowired
-    ObjectMapper objectMapper
-
     @SpringBean
     AccountService mockAccountService = Mock()
-
-    @SpringBean
-    JwtService mockJwtService = Mock()
-
-    @Shared
-    JwtHelper jwtHelper = new JwtHelper()
-
-    static class AuthenticatedUser {
-        UUID id
-        String jwt
-    }
-
-    private AuthenticatedUser createAuthenticatedUser(JwtService mockJwtService) {
-        UUID authenticatedUuid = UUID.randomUUID()
-        String jwt = jwtHelper.buildJwt(authenticatedUuid.toString(), ROLE_USER)
-        mockJwtService.getClaim(jwt) >> new JwtClaim(authenticatedUuid.toString(), ROLE_USER)
-        return new AuthenticatedUser(id: authenticatedUuid, jwt: jwt)
-    }
 
     //---------------------------------
     // POST /api/accounts tests
@@ -92,7 +53,7 @@ class AccountControllerSpec extends Specification {
         when: "POST /api/accounts is requested"
             def body = objectMapper.writeValueAsString(accountCreateRequest)
             def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -125,8 +86,8 @@ class AccountControllerSpec extends Specification {
                 "userId": differentUuid
             ]
             def body = objectMapper.writeValueAsString(payload)
-            def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+            mockMvc.perform(post(ENDPOINT_ACCOUNTS)
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -144,7 +105,7 @@ class AccountControllerSpec extends Specification {
         when: "POST /api/accounts is requested"
             def body = objectMapper.writeValueAsString(accountCreateRequest)
             def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -179,7 +140,7 @@ class AccountControllerSpec extends Specification {
         when: "POST /api/accounts is requested"
             def body = objectMapper.writeValueAsString(payload)
             def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -207,7 +168,7 @@ class AccountControllerSpec extends Specification {
         when: "POST /api/accounts is requested"
             def body = objectMapper.writeValueAsString(accountCreateRequest)
             def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -229,7 +190,7 @@ class AccountControllerSpec extends Specification {
         when: "POST /api/accounts is requested"
             def body = objectMapper.writeValueAsString(accountCreateRequest)
             def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -256,7 +217,7 @@ class AccountControllerSpec extends Specification {
         when: "POST /api/accounts is requested"
             def body = objectMapper.writeValueAsString(accountCreateRequest)
             def result = mockMvc.perform(post(ENDPOINT_ACCOUNTS)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -279,7 +240,7 @@ class AccountControllerSpec extends Specification {
 
         when: "GET /api/accounts is requested"
             def result = mockMvc.perform(get(ENDPOINT_ACCOUNTS)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json"))
 
         then: "the response is 200 OK"
@@ -300,7 +261,7 @@ class AccountControllerSpec extends Specification {
 
         when: "GET /api/accounts is requested"
             def result = mockMvc.perform(get(ENDPOINT_ACCOUNTS)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json"))
 
         then: "the response is 200 OK"
@@ -327,7 +288,7 @@ class AccountControllerSpec extends Specification {
 
         when: "GET /api/accounts/{id} is requested with that account's id"
             def result = mockMvc.perform(get(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json"))
 
         then: "the response is 200 OK with that account"
@@ -344,7 +305,7 @@ class AccountControllerSpec extends Specification {
 
         when: "GET /api/accounts/{id} is requested with that id"
             def result = mockMvc.perform(get(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json"))
 
         then: "the response is 404 Not Found in both cases"
@@ -362,7 +323,7 @@ class AccountControllerSpec extends Specification {
 
         when: "GET /api/accounts/{id} is requested with an id that is null, empty, blank, or not a UUID"
             def result = mockMvc.perform(get(ENDPOINT_ACCOUNTS + "/" + accountId)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json"))
 
         then: "the response is 400 Bad Request"
@@ -381,7 +342,7 @@ class AccountControllerSpec extends Specification {
 
         when: "GET /api/accounts/{id} is requested with an id that is empty or blank"
             def result = mockMvc.perform(get(ENDPOINT_ACCOUNTS + "/" + accountId)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json"))
 
         then: "the response is 404 Not Found"
@@ -406,7 +367,7 @@ class AccountControllerSpec extends Specification {
         when: "PATCH /api/accounts/{id} is requested with that account's id"
             def body = objectMapper.writeValueAsString(payload)
             def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -436,7 +397,7 @@ class AccountControllerSpec extends Specification {
         when: "PATCH /api/accounts/{id} is requested with that id"
             def body = objectMapper.writeValueAsString(request)
             def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -457,7 +418,7 @@ class AccountControllerSpec extends Specification {
         when: "PATCH /api/accounts/{id} is requested"
             def body = objectMapper.writeValueAsString(payload)
             def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -484,7 +445,7 @@ class AccountControllerSpec extends Specification {
         when: "PATCH /api/accounts/{id} is requested"
             def body = objectMapper.writeValueAsString(payload)
             def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -511,7 +472,7 @@ class AccountControllerSpec extends Specification {
         when: "PATCH /api/accounts/{id} is requested"
             def body = objectMapper.writeValueAsString(payload)
             def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -545,7 +506,7 @@ class AccountControllerSpec extends Specification {
             ]
             def body = objectMapper.writeValueAsString(payload)
             def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -565,7 +526,7 @@ class AccountControllerSpec extends Specification {
         when: "PATCH /api/accounts/{id} is requested with an malformed id"
             def body = objectMapper.writeValueAsString(request)
             def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -590,7 +551,7 @@ class AccountControllerSpec extends Specification {
         when: "PATCH /api/accounts/{id} is requested with an absent id"
             def body = objectMapper.writeValueAsString(request)
             def result = mockMvc.perform(patch(ENDPOINT_ACCOUNTS + "/" + accountId)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt))
+                .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
 
@@ -617,7 +578,7 @@ class AccountControllerSpec extends Specification {
 
         when: "DELETE /api/accounts/{id} is requested with that account's id"
             def result = mockMvc.perform(delete(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt)))
+                .cookie(accessTokenCookie(user.jwt)))
 
         then: "the response is 204 No Content"
             noExceptionThrown()
@@ -634,7 +595,7 @@ class AccountControllerSpec extends Specification {
 
         when: "DELETE /api/accounts/{id} is requested with that id"
             def result = mockMvc.perform(delete(ENDPOINT_ACCOUNTS + "/" + accountId.toString())
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt)))
+                .cookie(accessTokenCookie(user.jwt)))
 
         then: "the response is 404 Not Found in both cases"
             result.andExpect(status().isNotFound())
@@ -651,7 +612,7 @@ class AccountControllerSpec extends Specification {
 
         when: "DELETE /api/accounts/{id} is requested with an id that is the string \"null\" or not a UUID"
             def result = mockMvc.perform(delete(ENDPOINT_ACCOUNTS + "/" + accountId)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt)))
+                .cookie(accessTokenCookie(user.jwt)))
 
         then: "the response is 400 Bad Request"
             result.andExpect(status().isBadRequest())
@@ -672,7 +633,7 @@ class AccountControllerSpec extends Specification {
 
         when: "DELETE /api/accounts/{id} is requested with an id that is empty or blank"
             def result = mockMvc.perform(delete(ENDPOINT_ACCOUNTS + "/" + accountId)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, user.jwt)))
+                .cookie(accessTokenCookie(user.jwt)))
 
         then: "the response is 404 Not Found"
             result.andExpect(status().isNotFound())
@@ -695,21 +656,13 @@ class AccountControllerSpec extends Specification {
         given: "a request to an /api/accounts endpoint with no valid access-token cookie"
             AccountCreateRequest accountCreateRequest = ACCOUNT_CREATE_REQUEST
 
-            if (cookie != null) {
-                mockJwtService.getClaim(_ as String) >> { throw new JwtParserException(exceptionMessage) }
-            }
-
         when: "the request is made"
             def body = objectMapper.writeValueAsString(accountCreateRequest)
             def mvcRequest = post(ENDPOINT_ACCOUNTS)
                 .contentType("application/json")
                 .content(body)
 
-            if (cookie != null) {
-                mvcRequest = mvcRequest.cookie(accessTokenCookie(cookie))
-            }
-
-            def result = mockMvc.perform(mvcRequest)
+            def result = rejectUnauthenticatedRequest(mvcRequest, cookie)
 
         then: "the response is 401 Unauthorized"
             result.andExpect(status().isUnauthorized())
@@ -718,28 +671,18 @@ class AccountControllerSpec extends Specification {
             0 * mockAccountService.createAccount(_ as String, _ as AccountCreateRequest)
 
         where:
-            scenario           | cookie           | exceptionMessage
-            "no cookie"        | null             | "no cookie"
-            "malformed cookie" | "bad cookie"     | "bad token"
-            "expired cookie"   | "expired cookie" | "expired token"
+            scenario         | cookie
+            "no cookie"      | null
+            "invalid cookie" | "bad cookie"
     }
 
     @Unroll
     def "BACKEND-002-AC-23: GET ACCOUNTS - rejects an unauthenticated request before the controller runs - #scenario"() {
-        given: "a request to an /api/accounts endpoint with no valid access-token cookie"
-            if (cookie != null) {
-                mockJwtService.getClaim(_ as String) >> { throw new JwtParserException(exceptionMessage) }
-            }
-
-        when: "the request is made"
+        when: "a request to an /api/accounts endpoint with no valid access-token cookie"
             def mvcRequest = get(ENDPOINT_ACCOUNTS)
                 .contentType("application/json")
 
-            if (cookie != null) {
-                mvcRequest = mvcRequest.cookie(accessTokenCookie(cookie))
-            }
-
-            def result = mockMvc.perform(mvcRequest)
+            def result = rejectUnauthenticatedRequest(mvcRequest, cookie)
 
         then: "the response is 401 Unauthorized"
             result.andExpect(status().isUnauthorized())
@@ -748,28 +691,18 @@ class AccountControllerSpec extends Specification {
             0 * mockAccountService.getAccounts(_ as String)
 
         where:
-            scenario           | cookie           | exceptionMessage
-            "no cookie"        | null             | "no cookie"
-            "malformed cookie" | "bad cookie"     | "bad token"
-            "expired cookie"   | "expired cookie" | "expired token"
+            scenario         | cookie
+            "no cookie"      | null
+            "invalid cookie" | "bad cookie"
     }
 
     @Unroll
     def "BACKEND-002-AC-23: GET ACCOUNT - rejects an unauthenticated request before the controller runs - #scenario"() {
-        given: "a request to an /api/accounts endpoint with no valid access-token cookie"
-            if (cookie != null) {
-                mockJwtService.getClaim(_ as String) >> { throw new JwtParserException(exceptionMessage) }
-            }
-
-        when: "the request is made"
+        when: "a request to an /api/accounts endpoint with no valid access-token cookie"
             def mvcRequest = get(ENDPOINT_ACCOUNTS + "/" + UUID.randomUUID().toString())
                 .contentType("application/json")
 
-            if (cookie != null) {
-                mvcRequest = mvcRequest.cookie(accessTokenCookie(cookie))
-            }
-
-            def result = mockMvc.perform(mvcRequest)
+            def result = rejectUnauthenticatedRequest(mvcRequest, cookie)
 
         then: "the response is 401 Unauthorized"
             result.andExpect(status().isUnauthorized())
@@ -778,10 +711,9 @@ class AccountControllerSpec extends Specification {
             0 * mockAccountService.getAccount(_ as String, _ as UUID)
 
         where:
-            scenario           | cookie           | exceptionMessage
-            "no cookie"        | null             | "no cookie"
-            "malformed cookie" | "bad cookie"     | "bad token"
-            "expired cookie"   | "expired cookie" | "expired token"
+            scenario         | cookie
+            "no cookie"      | null
+            "invalid cookie" | "bad cookie"
     }
 
     @Unroll
@@ -789,21 +721,13 @@ class AccountControllerSpec extends Specification {
         given: "a request to an /api/accounts endpoint with no valid access-token cookie"
             AccountUpdateRequest accountUpdateRequest = ACCOUNT_UPDATE_REQUEST
 
-            if (cookie != null) {
-                mockJwtService.getClaim(_ as String) >> { throw new JwtParserException(exceptionMessage) }
-            }
-
         when: "the request is made"
             def body = objectMapper.writeValueAsString(accountUpdateRequest)
             def mvcRequest = patch(ENDPOINT_ACCOUNTS + "/" + UUID.randomUUID().toString())
                 .contentType("application/json")
                 .content(body)
 
-            if (cookie != null) {
-                mvcRequest = mvcRequest.cookie(accessTokenCookie(cookie))
-            }
-
-            def result = mockMvc.perform(mvcRequest)
+            def result = rejectUnauthenticatedRequest(mvcRequest, cookie)
 
         then: "the response is 401 Unauthorized"
             result.andExpect(status().isUnauthorized())
@@ -812,28 +736,18 @@ class AccountControllerSpec extends Specification {
             0 * mockAccountService.updateAccount(_ as String, _ as UUID, _ as AccountUpdateRequest)
 
         where:
-            scenario           | cookie           | exceptionMessage
-            "no cookie"        | null             | "no cookie"
-            "malformed cookie" | "bad cookie"     | "bad token"
-            "expired cookie"   | "expired cookie" | "expired token"
+            scenario         | cookie
+            "no cookie"      | null
+            "invalid cookie" | "bad cookie"
     }
 
     @Unroll
     def "BACKEND-002-AC-23: DELETE ACCOUNT - rejects an unauthenticated request before the controller runs - #scenario"() {
-        given: "a request to an /api/accounts endpoint with no valid access-token cookie"
-            if (cookie != null) {
-                mockJwtService.getClaim(_ as String) >> { throw new JwtParserException(exceptionMessage) }
-            }
-
-        when: "the request is made"
+        when: "a request to an /api/accounts endpoint with no valid access-token cookie"
             def mvcRequest = delete(ENDPOINT_ACCOUNTS + "/" + UUID.randomUUID().toString())
                 .contentType("application/json")
 
-            if (cookie != null) {
-                mvcRequest = mvcRequest.cookie(accessTokenCookie(cookie))
-            }
-
-            def result = mockMvc.perform(mvcRequest)
+            def result = rejectUnauthenticatedRequest(mvcRequest, cookie)
 
         then: "the response is 401 Unauthorized"
             result.andExpect(status().isUnauthorized())
@@ -842,9 +756,8 @@ class AccountControllerSpec extends Specification {
             0 * mockAccountService.deleteAccount(_ as String, _ as UUID)
 
         where:
-            scenario           | cookie           | exceptionMessage
-            "no cookie"        | null             | "no cookie"
-            "malformed cookie" | "bad cookie"     | "bad token"
-            "expired cookie"   | "expired cookie" | "expired token"
+            scenario         | cookie
+            "no cookie"      | null
+            "invalid cookie" | "bad cookie"
     }
 }

@@ -103,6 +103,12 @@ public class GlobalExceptionHandler {
             .body(ApiError.of(ex.getMessage()));
     }
 
+    @ExceptionHandler(TransactionDateException.class)
+    public ResponseEntity<ApiError> handleTransactionDateException(TransactionDateException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiError.of(ex.getMessage()));
+    }
+
     @ExceptionHandler(UserException.class)
     public ResponseEntity<ApiError> handleUserException(UserException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)

@@ -14,18 +14,23 @@ checkpoint.
 
 1. Identify what changed — the relevant AC (`.claude/specs/...`) if named, otherwise `git diff` or
    the files the user mentions.
-2. **First pass, high-level only:**
+2. **Re-read every file in scope from disk right before writing findings, even if it was already
+   read earlier this conversation.** The human is actively hand-coding during these sessions and
+   edits land between turns — an earlier Read result (this turn or a prior one) can be stale by
+   the time findings are reported. Never cite a finding from a Read that isn't the one immediately
+   preceding the findings you're about to write.
+3. **First pass, high-level only:**
    - Correctness against the AC's acceptance criteria.
    - Security issues (auth, validation, SQL injection, sensitive-data handling — this project
      exists in part to learn this properly, so don't skip it even for small changes).
    - Style against this project's own conventions (`.claude/steering/structure.md`, `tech.md`) and
      the global Java/Spring defaults (`~/.claude/CLAUDE.md`).
    - Missed edge cases that are obvious at a glance.
-3. Report findings as a plain list — what's good, what's worth changing, and why. Don't fix
+4. Report findings as a plain list — what's good, what's worth changing, and why. Don't fix
    anything yourself unless explicitly asked to.
-4. **Only go line-by-line or suggest specific code if the user asks for that level of detail** —
+5. **Only go line-by-line or suggest specific code if the user asks for that level of detail** —
    default to describing the issue and why it matters, not supplying the fix.
-5. If the AC's Spock skeleton (written by `backend-dev` — labelled `given`/`when`/`then` blocks,
+6. If the AC's Spock skeleton (written by `backend-dev` — labelled `given`/`when`/`then` blocks,
    no bodies) hasn't actually been filled in with real content and run red before the
    implementation went green, flag that specifically — skipping the red phase defeats the TDD
    discipline this project exists to practice.

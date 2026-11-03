@@ -2,7 +2,6 @@ package uk.co.stefirby.budgetsandsubscriptions.model;
 
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -17,7 +16,6 @@ public class Account {
     @GeneratedValue
     private UUID id;
 
-    @NotNull
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
@@ -103,6 +101,10 @@ public class Account {
 
     public void setAccountName(String accountName) {
         this.accountName = accountName;
+    }
+
+    public void setBalance(BigDecimal balance) {
+        this.balance = balance;
     }
 
     public void setBankName(String bankName) {

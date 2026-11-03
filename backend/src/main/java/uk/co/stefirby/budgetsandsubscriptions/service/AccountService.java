@@ -1,29 +1,27 @@
 package uk.co.stefirby.budgetsandsubscriptions.service;
 
-import org.jspecify.annotations.NonNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import uk.co.stefirby.budgetsandsubscriptions.dto.AccountCreateRequest;
 import uk.co.stefirby.budgetsandsubscriptions.dto.AccountResponse;
 import uk.co.stefirby.budgetsandsubscriptions.dto.AccountUpdateRequest;
-import uk.co.stefirby.budgetsandsubscriptions.exception.AccountNotFoundException;
 import uk.co.stefirby.budgetsandsubscriptions.model.Account;
 import uk.co.stefirby.budgetsandsubscriptions.repository.AccountRepository;
+import uk.co.stefirby.budgetsandsubscriptions.service.common.AccountAccessService;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class AccountService {
-    private static final Logger LOG = LoggerFactory.getLogger(AccountService.class);
 
     private final AccountRepository accountRepository;
+    private final AccountAccessService accountAccessService;
 
-    public AccountService(AccountRepository accountRepository) {
+    public AccountService(AccountRepository accountRepository,
+                          AccountAccessService accountAccessService) {
         this.accountRepository = accountRepository;
+        this.accountAccessService = accountAccessService;
     }
 
     @Transactional
@@ -49,7 +47,7 @@ public class AccountService {
 
     @Transactional
     public AccountResponse getAccount(String userId, UUID accountId) {
-        Account userAccount = getAccountForUser(UUID.fromString(userId), accountId);
+        Account userAccount = accountAccessService.getAccountForUser(UUID.fromString(userId), accountId);
 
         return mapAccountToAccountResponse(userAccount);
     }
@@ -57,7 +55,7 @@ public class AccountService {
     @Transactional
     public AccountResponse updateAccount(String userId, UUID accountId, AccountUpdateRequest requestBody) {
         // first make sure that the account belongs to the owner
-        Account userAccount = getAccountForUser(UUID.fromString(userId), accountId);
+        Account userAccount = accountAccessService.getAccountForUser(UUID.fromString(userId), accountId);
 
         // now update the fields as expected
         if (requestBody.accountName() != null && !requestBody.accountName().isEmpty()) {
@@ -76,7 +74,7 @@ public class AccountService {
     @Transactional
     public void deleteAccount(String userId, UUID accountId) {
         // first make sure that the account belongs to the owner
-        Account userAccount = getAccountForUser(UUID.fromString(userId), accountId);
+        Account userAccount = accountAccessService.getAccountForUser(UUID.fromString(userId), accountId);
 
         accountRepository.delete(userAccount);
     }
@@ -84,15 +82,6 @@ public class AccountService {
     //------------------
     // private methods
     //==================
-
-    private @NonNull Account getAccountForUser(UUID userId, UUID accountId) {
-        Optional<Account> checkAccount = accountRepository.findByIdAndUserId(accountId, userId);
-        if (checkAccount.isEmpty()) {
-            LOG.info("No account with id: {} for user {}", accountId, userId);
-            throw new AccountNotFoundException("Account not found");
-        }
-        return checkAccount.get();
-    }
 
     private List<AccountResponse> mapAccountsToAccountResponses(List<Account> accountList) {
         return accountList.stream()

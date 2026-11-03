@@ -1,33 +1,19 @@
 package uk.co.stefirby.budgetsandsubscriptions.controller
 
-import jakarta.servlet.http.Cookie
 import org.spockframework.spring.SpringBean
-import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
 import org.springframework.context.annotation.Import
-import org.springframework.test.web.servlet.MockMvc
-import spock.lang.Shared
-import spock.lang.Specification
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import spock.lang.Unroll
-import tools.jackson.databind.ObjectMapper
-import uk.co.stefirby.budgetsandsubscriptions.dto.JwtClaim
 import uk.co.stefirby.budgetsandsubscriptions.dto.LoginRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.RegisterRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.UserResponse
 import uk.co.stefirby.budgetsandsubscriptions.exception.DuplicateEmailException
-import uk.co.stefirby.budgetsandsubscriptions.exception.JwtParserException
 import uk.co.stefirby.budgetsandsubscriptions.exception.LoginException
-import uk.co.stefirby.budgetsandsubscriptions.security.JwtService
 import uk.co.stefirby.budgetsandsubscriptions.security.SecurityConfig
-import uk.co.stefirby.budgetsandsubscriptions.security.util.JwtHelper
 import uk.co.stefirby.budgetsandsubscriptions.service.AuthService
 
-import static org.hamcrest.Matchers.aMapWithSize
-import static org.hamcrest.Matchers.allOf
-import static org.hamcrest.Matchers.containsString
-import static org.hamcrest.Matchers.hasItem
-import static org.hamcrest.Matchers.hasSize
-import static org.hamcrest.Matchers.not
+import static org.hamcrest.Matchers.*
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
@@ -37,7 +23,7 @@ import static uk.co.stefirby.budgetsandsubscriptions.security.util.CookieHelper.
 
 @WebMvcTest(controllers = AuthController)
 @Import(SecurityConfig)
-class AuthControllerSpec extends Specification {
+class AuthControllerSpec extends BaseControllerSpec {
 
     private static final String ENDPOINT_LOGIN = "/api/auth/login"
     private static final String ENDPOINT_REGISTER = "/api/auth/register"
@@ -50,20 +36,8 @@ class AuthControllerSpec extends Specification {
     private static final String MOCK_JWT = "mock.jwt"
     private static final String DUMMY_MESSAGE = "dummy message"
 
-    @Autowired
-    MockMvc mockMvc
-
-    @Autowired
-    ObjectMapper objectMapper
-
     @SpringBean
     AuthService mockAuthService = Mock()
-
-    @SpringBean
-    JwtService mockJwtService = Mock()
-
-    @Shared
-    JwtHelper jwtHelper = new JwtHelper()
 
     private void setupMockForSuccessfulRegistration(RegisterRequest registerRequest, UUID uuid) {
         def validResponse = new UserResponse(uuid, registerRequest.email(), registerRequest.displayName(), ROLE_USER)
@@ -354,50 +328,37 @@ class AuthControllerSpec extends Specification {
 
     def "AUTH-001-AC-14: returns the current user for a valid session"() {
         given: "a valid, unexpired access-token cookie for an existing user"
-            UUID uuid = getRandomUuid()
-            UserResponse validResponse = new UserResponse(uuid, NEW_EMAIL_ADDRESS, DISPLAY_NAME, ROLE_USER)
-            mockAuthService.getUserDetailsById(uuid.toString()) >> validResponse
-
-            String jwt = jwtHelper.buildJwt(uuid.toString(), ROLE_USER)
-            mockJwtService.getClaim(jwt) >> new JwtClaim(uuid.toString(), ROLE_USER)
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UserResponse validResponse = new UserResponse(user.id, NEW_EMAIL_ADDRESS, DISPLAY_NAME, ROLE_USER)
+            mockAuthService.getUserDetailsById(user.id.toString()) >> validResponse
 
         when: "GET /api/auth/me is requested with that cookie"
             def result = mockMvc.perform(get(ENDPOINT_GET_CURRENT_USER)
-                .cookie(new Cookie(COOKIE_ACCESS_TOKEN, jwt)))
+                .cookie(accessTokenCookie(user.jwt)))
 
         then: "the response is 200 OK with the user's id, email, displayName, and role"
             result.andExpect(status().isOk())
             String responseJson = result.andReturn().getResponse().getContentAsString()
             UserResponse response = objectMapper.readValue(responseJson, UserResponse)
-            response.id() == uuid
+            response.id() == user.id
             response.email() == NEW_EMAIL_ADDRESS
             response.displayName() == DISPLAY_NAME
             response.role() == ROLE_USER
     }
 
-    def "AUTH-001-AC-15: rejects a missing, invalid, or expired session"() {
-        given: "a request with either no cookie, a malformed cookie, or an expired/invalid-signature token"
-            if (cookie != null) {
-                mockJwtService.getClaim(_ as String) >> { throw new JwtParserException(exceptionMessage) }
-            }
-
+    @Unroll
+    def "AUTH-001-AC-15: rejects a session with #scenario"() {
         when: "GET /api/auth/me is requested"
-            def result
-            if (cookie == null) {
-                result = mockMvc.perform(get(ENDPOINT_GET_CURRENT_USER))
-            } else {
-                result = mockMvc.perform(get(ENDPOINT_GET_CURRENT_USER)
-                    .cookie(accessTokenCookie(cookie)))
-            }
+            MockHttpServletRequestBuilder requestBuilder = get(ENDPOINT_GET_CURRENT_USER)
+            def result = rejectUnauthenticatedRequest(requestBuilder, cookie)
 
         then: "the response is 401 Unauthorized"
             result.andExpect(status().isUnauthorized())
 
         where:
-            scenario           | cookie           | exceptionMessage
-            "no cookie"        | null             | "no cookie"
-            "malformed cookie" | "bad cookie"     | "bad token"
-            "expired cookie"   | "expired cookie" | "expired token"
+            scenario         | cookie
+            "no cookie"      | null
+            "invalid cookie" | "bad cookie"
     }
 
     //---------------------------------

@@ -9,6 +9,7 @@ import uk.co.stefirby.budgetsandsubscriptions.dto.AccountUpdateRequest
 import uk.co.stefirby.budgetsandsubscriptions.model.Account
 import uk.co.stefirby.budgetsandsubscriptions.model.AccountType
 import uk.co.stefirby.budgetsandsubscriptions.repository.AccountRepository
+import uk.co.stefirby.budgetsandsubscriptions.service.common.AccountAccessService
 
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountConstants.*
 
@@ -19,9 +20,10 @@ class AccountServiceSpec extends Specification {
 
     AccountRepository mockAccountRepository = Mock()
     Account mockAccount = Mock()
+    AccountAccessService mockAccountAccessService = Mock()
 
     def setup() {
-        accountService = new AccountService(mockAccountRepository)
+        accountService = new AccountService(mockAccountRepository, mockAccountAccessService)
     }
 
     def mockCreateAccountResponse(UUID userId, UUID randomId, AccountCreateRequest request, Account mockAccount) {
@@ -35,7 +37,7 @@ class AccountServiceSpec extends Specification {
         mockAccount.userId >> userId
     }
 
-    def Account buildAccount1(UUID userId) {
+    Account buildAccount1(UUID userId) {
         return new Account(
             userId,
             ACCOUNT_BANK_NAME,
@@ -45,7 +47,7 @@ class AccountServiceSpec extends Specification {
             AccountType.CURRENT
         )
     }
-    def Account buildAccount2(UUID userId) {
+    Account buildAccount2(UUID userId) {
         return new Account(
             userId,
             ACCOUNT_BANK_NAME_1,
@@ -128,7 +130,7 @@ class AccountServiceSpec extends Specification {
         given: "valid user with uuid format who has an account"
             UUID userId = UUID.randomUUID()
             UUID accountId = UUID.randomUUID()
-            mockAccountRepository.findByIdAndUserId(accountId, userId) >> Optional.of(buildAccount1(userId))
+            mockAccountAccessService.getAccountForUser(userId, accountId) >> buildAccount1(userId)
 
         when: "getAccounts is called for that user and account id"
             AccountResponse response = accountService.getAccount(userId.toString(), accountId)
@@ -155,7 +157,7 @@ class AccountServiceSpec extends Specification {
             AccountResponse response = accountService.updateAccount(userId.toString(), accountId, accountUpdateRequest)
 
         then: "find and update account performed on repository"
-            1 * mockAccountRepository.findByIdAndUserId(accountId, userId) >> Optional.of(buildAccount1(userId))
+            1 * mockAccountAccessService.getAccountForUser(userId, accountId) >> buildAccount1(userId)
             1 * mockAccountRepository.saveAndFlush(_ as Account) >> { Account a -> a }
 
         and: "response is returned with updated fields for those in the request and unchanged for the others"
@@ -180,7 +182,7 @@ class AccountServiceSpec extends Specification {
             UUID userId = UUID.randomUUID()
             UUID accountId = UUID.randomUUID()
             Account account = buildAccount1(userId)
-            mockAccountRepository.findByIdAndUserId(accountId, userId) >> Optional.of(account)
+            mockAccountAccessService.getAccountForUser(userId, accountId) >> account
 
         when: "deleteAccount is called"
             accountService.deleteAccount(userId.toString(), accountId)

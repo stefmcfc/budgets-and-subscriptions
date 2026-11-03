@@ -4,6 +4,7 @@ import jakarta.validation.ConstraintViolationException
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.test.context.ActiveProfiles
 import spock.lang.Specification
 import spock.lang.Unroll
@@ -104,7 +105,7 @@ class AccountSpec extends Specification {
             accountRepository.saveAndFlush(account)
 
         then: "persistence fails"
-            thrown(ConstraintViolationException)
+            thrown(DataIntegrityViolationException)
     }
 
     def "BACKEND-002-AC-05: seeds balance equal to opening balance at construction"() {
