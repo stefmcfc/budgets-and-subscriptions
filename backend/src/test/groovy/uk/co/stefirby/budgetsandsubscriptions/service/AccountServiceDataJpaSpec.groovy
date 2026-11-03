@@ -14,12 +14,13 @@ import uk.co.stefirby.budgetsandsubscriptions.model.Account
 import uk.co.stefirby.budgetsandsubscriptions.model.AccountType
 import uk.co.stefirby.budgetsandsubscriptions.repository.AccountRepository
 import uk.co.stefirby.budgetsandsubscriptions.repository.UserRepository
+import uk.co.stefirby.budgetsandsubscriptions.service.common.AccountAccessService
 
 import java.time.LocalDate
 
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountConstants.*
-import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountEntityHelper.createAccount1
-import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountEntityHelper.createAccount2
+import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountEntityHelper.createAndPersistAccount1
+import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountEntityHelper.createAndPersistAccount2
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.UserEntityHelper.createUser
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.UserEntityHelper.createUser2
 
@@ -36,8 +37,11 @@ class AccountServiceDataJpaSpec extends Specification {
     @Autowired
     UserRepository userRepository
 
+    AccountAccessService accountAccessService
+
     def setup() {
-        accountService = new AccountService(accountRepository)
+        accountAccessService = new AccountAccessService(accountRepository)
+        accountService = new AccountService(accountRepository, accountAccessService)
     }
 
     //----------------------------
@@ -75,11 +79,11 @@ class AccountServiceDataJpaSpec extends Specification {
     def "BACKEND-002-AC-13: lists only the authenticated user's own accounts"() {
         given: "two users, first one has 2 accounts, second has 1"
             UUID uuid1 = createUser(userRepository)
-            UUID user1Account1 = createAccount1(uuid1, accountRepository)
-            UUID user1Account2 = createAccount2(uuid1, accountRepository)
+            UUID user1Account1 = createAndPersistAccount1(uuid1, accountRepository)
+            UUID user1Account2 = createAndPersistAccount2(uuid1, accountRepository)
 
             UUID uuid2 = createUser2(userRepository)
-            UUID user2Account1 = createAccount1(uuid2, accountRepository)
+            UUID user2Account1 = createAndPersistAccount1(uuid2, accountRepository)
 
         when: "getAccounts is called for user 1 and user 2"
             List<AccountResponse> user1AccountList = accountService.getAccounts(uuid1.toString())
@@ -113,8 +117,8 @@ class AccountServiceDataJpaSpec extends Specification {
     def "BACKEND-002-AC-15: returns a single owned account"() {
         given: "a user, with 2 accounts"
             UUID uuid = createUser(userRepository)
-            UUID userAccount1 = createAccount1(uuid, accountRepository)
-            UUID userAccount2 = createAccount2(uuid, accountRepository)
+            UUID userAccount1 = createAndPersistAccount1(uuid, accountRepository)
+            UUID userAccount2 = createAndPersistAccount2(uuid, accountRepository)
 
         when: "getAccount is called for one of the accounts"
             AccountResponse response = accountService.getAccount(uuid.toString(), userAccount1)
@@ -141,7 +145,7 @@ class AccountServiceDataJpaSpec extends Specification {
             UUID uuid1 = createUser(userRepository)
 
             UUID uuid2 = createUser2(userRepository)
-            UUID user2Account1 = createAccount1(uuid2, accountRepository)
+            UUID user2Account1 = createAndPersistAccount1(uuid2, accountRepository)
 
         when: "getAccount is called on user2's account with user1 as the owner"
             accountService.getAccount(uuid1.toString(), user2Account1)
@@ -198,7 +202,7 @@ class AccountServiceDataJpaSpec extends Specification {
     def "BACKEND-002-AC-21: deletes an owned account"() {
         given: "an account owned by the authenticated user"
             UUID userId = createUser(userRepository)
-            UUID userAccount1 = createAccount1(userId, accountRepository)
+            UUID userAccount1 = createAndPersistAccount1(userId, accountRepository)
 
         when: "deleteAccount is requested with that account's id"
             accountService.deleteAccount(userId.toString(), userAccount1)
@@ -212,7 +216,7 @@ class AccountServiceDataJpaSpec extends Specification {
             UUID user1 = createUser(userRepository)
 
             UUID user2 = createUser2(userRepository)
-            UUID user2Account1 = createAccount1(user2, accountRepository)
+            UUID user2Account1 = createAndPersistAccount1(user2, accountRepository)
 
         when: "deleteAccount called by user1 for an account belonging to user2"
             accountService.deleteAccount(user1.toString(), user2Account1)

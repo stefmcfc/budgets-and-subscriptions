@@ -1,6 +1,6 @@
 # Transactions (Backend)
 
-**Status**: Not started
+**Status**: In progress
 **Priority**: P1 — second and final spec of build order step 2 ("Accounts and transactions");
 completes that step once implemented.
 **Depends on**: `backend_spec_002_accounts.md` (the `Account` entity transactions attach to and
@@ -474,19 +474,19 @@ regression-guard role `BACKEND-002-AC-23` served for accounts.
 
 ## Acceptance Criteria Summary
 
-- [ ] BACKEND-003-AC-01 [AUTO]: `Transaction` rejects persistence with a null `amount`
-- [ ] BACKEND-003-AC-02 [AUTO]: `Transaction` rejects persistence with a null `date`
-- [ ] BACKEND-003-AC-03 [AUTO]: `Transaction` rejects persistence with a null or blank `description`
-- [ ] BACKEND-003-AC-03a [AUTO]: `Transaction` accepts persistence with a null `rawDescription`
-- [ ] BACKEND-003-AC-04 [AUTO]: `Transaction` persistence fails with no owning `Account` set
-- [ ] BACKEND-003-AC-05 [AUTO]: `transactions` table schema matches entity mapping at startup
-- [ ] BACKEND-003-AC-06 [AUTO]: Valid create returns 201 with the created transaction, balance increased by `amount`
-- [ ] BACKEND-003-AC-07 [AUTO]: Create returns 404 uniformly for not-found/not-owned account, no transaction created
-- [ ] BACKEND-003-AC-08 [AUTO]: Missing/invalid `amount` on create returns 400, no transaction created
-- [ ] BACKEND-003-AC-09 [AUTO]: Missing/blank `description` on create returns 400, no transaction created
-- [ ] BACKEND-003-AC-10 [AUTO]: Missing or too-early `date` on create returns 400, no transaction created
-- [ ] BACKEND-003-AC-11a [AUTO]: Create returns 400 for a supplied-but-invalid `accountId`
-- [ ] BACKEND-003-AC-11b [AUTO]: Create returns 404 for an absent `accountId`
+- [x] BACKEND-003-AC-01 [AUTO]: `Transaction` rejects persistence with a null `amount`
+- [x] BACKEND-003-AC-02 [AUTO]: `Transaction` rejects persistence with a null `date`
+- [x] BACKEND-003-AC-03 [AUTO]: `Transaction` rejects persistence with a null or blank `description`
+- [x] BACKEND-003-AC-03a [AUTO]: `Transaction` accepts persistence with a null `rawDescription`
+- [x] BACKEND-003-AC-04 [AUTO]: `Transaction` persistence fails with no owning `Account` set
+- [x] BACKEND-003-AC-05 [AUTO]: `transactions` table schema matches entity mapping at startup
+- [x] BACKEND-003-AC-06 [AUTO]: Valid create returns 201 with the created transaction, balance increased by `amount`
+- [x] BACKEND-003-AC-07 [AUTO]: Create returns 404 uniformly for not-found/not-owned account, no transaction created
+- [x] BACKEND-003-AC-08 [AUTO]: Missing/invalid `amount` on create returns 400, no transaction created
+- [x] BACKEND-003-AC-09 [AUTO]: Missing/blank `description` on create returns 400, no transaction created
+- [x] BACKEND-003-AC-10 [AUTO]: Missing or too-early `date` on create returns 400, no transaction created
+- [x] BACKEND-003-AC-11a [AUTO]: Create returns 400 for a supplied-but-invalid `accountId`
+- [x] BACKEND-003-AC-11b [AUTO]: Create returns 404 for an absent `accountId`
 - [ ] BACKEND-003-AC-12 [AUTO]: List returns every transaction for an owned account, 200
 - [ ] BACKEND-003-AC-13 [AUTO]: List returns an empty list when the account has no transactions
 - [ ] BACKEND-003-AC-14 [AUTO]: List returns 404 uniformly for not-found/not-owned account

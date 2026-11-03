@@ -14,7 +14,8 @@ import uk.co.stefirby.budgetsandsubscriptions.repository.UserRepository
 
 import java.time.LocalDate
 
-import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountEntityHelper.createAccount1
+import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountEntityHelper.createAndPersistAccount1
+import static uk.co.stefirby.budgetsandsubscriptions.model.util.TransactionEntityHelper.*
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.UserEntityHelper.createUser
 
 @DataJpaTest
@@ -33,7 +34,7 @@ class TransactionSpec extends Specification {
 
     private UUID createUserAndAccount() {
         UUID userId = createUser(userRepository)
-        return createAccount1(userId, accountRepository)
+        return createAndPersistAccount1(userId, accountRepository)
     }
 
     def "BACKEND-003-AC-01: rejects a null amount"() {
@@ -53,27 +54,21 @@ class TransactionSpec extends Specification {
         given: "a new Transaction with a positive amount, one with zero, and a separate one with a negative amount"
             UUID accountId = createUserAndAccount()
 
-            BigDecimal positiveAmount = BigDecimal.valueOf(100)
-            BigDecimal negativeAmount = BigDecimal.valueOf(-50)
-            BigDecimal zeroAmount = BigDecimal.ZERO
-            Transaction newTransaction1 = new Transaction(accountId, positiveAmount,
-                LocalDate.of(2026, 2, 1), "positive amount", "transaction 1")
-            Transaction newTransaction2 = new Transaction(accountId, negativeAmount,
-                LocalDate.of(2026, 2, 1), "negative amount", "transaction 2")
-            Transaction newTransaction3 = new Transaction(accountId, zeroAmount,
-                LocalDate.of(2026, 2, 1), "zero amount", "transaction 3")
+            Transaction positiveTransaction = positiveTransaction(accountId)
+            Transaction negativeTransaction = negativeTransaction(accountId)
+            Transaction zeroTransaction = zeroTransaction(accountId)
 
         when: "each transaction is persisted"
-            transactionRepository.saveAndFlush(newTransaction1)
-            transactionRepository.saveAndFlush(newTransaction2)
-            transactionRepository.saveAndFlush(newTransaction3)
+            transactionRepository.saveAndFlush(positiveTransaction)
+            transactionRepository.saveAndFlush(negativeTransaction)
+            transactionRepository.saveAndFlush(zeroTransaction)
 
         then: "all persist successfully with their given amount"
             List<Transaction> transactionList = transactionRepository.findAllByAccountId(accountId)
             transactionList.size() == 3
-            transactionList.any { it.amount == positiveAmount }
-            transactionList.any { it.amount == negativeAmount }
-            transactionList.any { it.amount == zeroAmount }
+            transactionList.any { it.amount == positiveTransaction.amount }
+            transactionList.any { it.amount == negativeTransaction.amount }
+            transactionList.any { it.amount == zeroTransaction.amount }
 
     }
 
@@ -134,12 +129,12 @@ class TransactionSpec extends Specification {
             transactionRepository.saveAndFlush(newTransaction)
 
         then: "persistence fails"
-            thrown(expectedException)
+            thrown(DataIntegrityViolationException)
 
         where:
-            scenario                 | accountId         | expectedException
-            "null account Id"        | null              | ConstraintViolationException
-            "no owning account set"  | UUID.randomUUID() | DataIntegrityViolationException
+            scenario                 | accountId
+            "null account Id"        | null
+            "no owning account set"  | UUID.randomUUID()
     }
 
     def "BACKEND-003-AC-05: application context loads with a schema-valid transactions table"() {

@@ -1589,3 +1589,34 @@ to make this test's request differ in shape from `AUTH-001-AC-15`'s "no cookie" 
 hand-constructing a cookie-less request from scratch, so the test proves logout's actual effect
 causes the rejection, instead of asserting two unrelated facts independently and trusting they
 compose correctly.
+
+## Sharing logic between two services: a plain injected collaborator, not a static class or a base class
+
+**Context**: `AccountService` and `TransactionService` both need the same "does this account belong
+to this user" check against `AccountRepository`. Deciding how to share it — a `final` class with
+static methods, a base class both services extend, or a separate `@Service` injected into both.
+
+**Why not static methods**: the check needs `AccountRepository`, and a static method can't have
+that injected by Spring — it would have to be passed in as a parameter on every call site (pushing
+the coupling problem onto the caller) or faked via some manually-wired static field. It also makes
+mocking in Spock tests harder: there's no clean way to stub a static call the way `Mock()` stubs an
+injected collaborator, so a consuming service's test suite loses the ability to isolate this
+behaviour.
+
+**Why not a base class**: `TransactionService extends AccountOwnershipBase` models "a
+`TransactionService` *is a* account-ownership-checker," which isn't true — it just *needs* one.
+That's composition-over-inheritance territory: it forces both services' constructors into whatever
+shape the base class dictates, and makes the shared behaviour harder to mock out in a subclass's own
+Spock spec than a plain constructor-injected dependency would be.
+
+**The actual fix**: a separate `@Service` (constructor-injected with just `AccountRepository`,
+nothing else) that both `AccountService` and `TransactionService` take as a normal constructor
+dependency and call like any other collaborator. This is just composition — "service calling
+service" isn't a smell here, it's the standard Spring pattern for logic two services both need, no
+different in kind from either service already depending on its own repository.
+
+**Naming trap worth watching for**: naming the extracted class something like `*Utils` reads as a
+static-helper name by Java convention (`StringUtils`-style), even when it's actually a proper
+`@Service`-annotated, DI-managed bean with real dependencies. A name describing what it actually
+*does* (e.g. `AccountAccessService`) avoids misleading a future reader about whether it's safe to
+call it statically.
