@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-03
+
 ### Added
 - `POST /api/accounts/{accountId}/transactions`: creates a transaction against an owned account
   and responds `201` with the created transaction (`BACKEND-003-AC-06`). Returns `404` uniformly
