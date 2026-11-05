@@ -29,4 +29,8 @@ public class AccountAccessService {
         }
         return checkAccount.get();
     }
+
+    public void verifyAccountOwnership(UUID userId, UUID accountId) {
+        getAccountForUser(userId, accountId);
+    }
 }

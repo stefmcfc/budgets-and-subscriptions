@@ -7,6 +7,7 @@ import org.springframework.test.context.ActiveProfiles
 import spock.lang.Specification
 import spock.lang.Subject
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionCreateRequest
+import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionResponse
 import uk.co.stefirby.budgetsandsubscriptions.exception.AccountNotFoundException
 import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionDateException
 import uk.co.stefirby.budgetsandsubscriptions.model.Transaction
@@ -19,6 +20,7 @@ import java.time.Clock
 import java.time.Instant
 
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountEntityHelper.createAndPersistAccount1
+import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountEntityHelper.createAndPersistAccount2
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.TransactionEntityHelper.*
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.UserEntityHelper.createUser
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.UserEntityHelper.createUser2
@@ -44,6 +46,10 @@ class TransactionServiceDataJpaSpec extends Specification {
         accountAccessService = new AccountAccessService(accountRepository)
         transactionService = new TransactionService(accountAccessService, accountRepository, transactionRepository)
     }
+
+    //----------------------------
+    // addTransaction tests
+    //============================
 
     def "BACKEND-003-AC-06: creates a transaction and increases the account's balance"() {
         given: "an authenticated user and an owned account"
@@ -123,5 +129,79 @@ class TransactionServiceDataJpaSpec extends Specification {
 
         and: "no transaction is created in the DB for that user"
             transactionRepository.findAllByAccountId(userAccount).size() == 0
+    }
+
+    //----------------------------
+    // getAllTransactions tests
+    //============================
+
+    def "BACKEND-003-AC-12: lists only the authenticated user's accounts own transactions"() {
+        given: "an account owned by the authenticated user with several transactions recorded against it"
+            UUID userId = createUser(userRepository)
+
+            UUID userAccount1 = createAndPersistAccount1(userId, accountRepository)
+            UUID account1Transaction1 = createAndPersistPositiveTransaction(userAccount1, transactionRepository)
+            UUID account1Transaction2 = createAndPersistNegativeTransaction(userAccount1, transactionRepository)
+            UUID account1Transaction3 = createAndPersistZeroTransaction(userAccount1, transactionRepository)
+
+            UUID userAccount2 = createAndPersistAccount2(userId, accountRepository)
+            UUID account2Transaction1 = createAndPersistPositiveTransaction(userAccount2, transactionRepository)
+
+        when: "getAllTransactions is called for account1 and account2"
+            List<TransactionResponse> account1Transactions =
+                transactionService.getAllTransactions(userId.toString(), userAccount1)
+            List<TransactionResponse> account2Transactions =
+                transactionService.getAllTransactions(userId.toString(), userAccount2)
+
+        then: "account1 has three transactions with the correct IDs"
+            account1Transactions.size() == 3
+            account1Transactions.any {it.id() == account1Transaction1}
+            account1Transactions.any {it.id() == account1Transaction2}
+            account1Transactions.any {it.id() == account1Transaction3}
+
+        and: "account2 only has one transaction"
+            account2Transactions.size() == 1
+            account2Transactions.getLast().id() == account2Transaction1
+    }
+
+    def "BACKEND-003-AC-13: returns an empty list for an owned account with no transactions"() {
+        given: "an account owned by the authenticated user with no transactions"
+            UUID userId = createUser(userRepository)
+            UUID userAccount = createAndPersistAccount1(userId, accountRepository)
+
+        when: "getAllTransactions is called with that account's id"
+            List<TransactionResponse> accountTransactions =
+                transactionService.getAllTransactions(userId.toString(), userAccount)
+
+        then: "the response is an empty list"
+            accountTransactions.size() == 0
+    }
+
+    def "BACKEND-003-AC-14: exception is thrown for a non-existent account"() {
+        given: "a non-existent account id"
+            UUID userId = createUser(userRepository)
+            UUID randomAccount = UUID.randomUUID()
+
+        when: "getAllTransactions is called"
+            List<TransactionResponse> accountTransactions =
+                transactionService.getAllTransactions(userId.toString(), randomAccount)
+
+        then: "exception is thrown"
+            thrown(AccountNotFoundException)
+    }
+
+    def "BACKEND-003-AC-14: exception is thrown for a non-owned account"() {
+        given: "an account id with transaction(s) owned by a different user"
+            UUID user1 = createUser(userRepository)
+
+            UUID user2 = createUser2(userRepository)
+            UUID user2Account1 = createAndPersistAccount1(user2, accountRepository)
+            createAndPersistPositiveTransaction(user2Account1, transactionRepository)
+
+        when: "getAllTransactions is called on user2's account with user1 as the owner"
+            transactionService.getAllTransactions(user1.toString(), user2Account1)
+
+        then: "exception is thrown"
+            thrown(AccountNotFoundException)
     }
 }

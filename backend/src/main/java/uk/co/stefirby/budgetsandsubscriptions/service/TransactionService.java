@@ -16,6 +16,7 @@ import uk.co.stefirby.budgetsandsubscriptions.service.common.AccountAccessServic
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -56,6 +57,14 @@ public class TransactionService {
         return mapTransactionToTransactionResponse(createdTransaction);
     }
 
+    public List<TransactionResponse> getAllTransactions(String userId, UUID accountId) {
+        // first make sure that the account belongs to the owner
+        accountAccessService.verifyAccountOwnership(UUID.fromString(userId), accountId);
+
+        List<Transaction> transactionList = transactionRepository.findAllByAccountId(accountId);
+        return mapTransactionsToTransactionResponses(transactionList);
+    }
+
     //------------------
     // private methods
     //==================
@@ -68,6 +77,12 @@ public class TransactionService {
             transactionCreateRequest.description(),
             transactionCreateRequest.rawDescription()
         );
+    }
+
+    private List<TransactionResponse> mapTransactionsToTransactionResponses(List<Transaction> transactionList) {
+        return transactionList.stream()
+            .map(this::mapTransactionToTransactionResponse)
+            .toList();
     }
 
     private TransactionResponse mapTransactionToTransactionResponse(Transaction createdTransaction) {
