@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-05
+
 ### Added
 - `GET /api/accounts/{accountId}/transactions`: lists every transaction for an owned account and
   responds `200` (`BACKEND-003-AC-12`), including an empty list when the account has none
