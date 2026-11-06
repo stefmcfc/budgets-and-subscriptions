@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `GET /api/accounts/{accountId}/transactions/{transactionId}`: returns an owned transaction and
+  responds `200` (`BACKEND-003-AC-15`). Returns `404` uniformly for a non-existent or non-owned
+  account, or a `transactionId` that doesn't exist or belongs to a different account
+  (`AC-16`), reusing the existing malformed/absent-`accountId` handling (`AC-11e`, `AC-11f`) and
+  extending it to the new `transactionId` path segment (`AC-17a`, `AC-17b`).
+
 ## [0.12.0] - 2026-11-05
 
 ### Added

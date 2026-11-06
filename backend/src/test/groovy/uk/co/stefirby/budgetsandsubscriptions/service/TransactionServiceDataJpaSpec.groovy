@@ -10,6 +10,7 @@ import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionCreateRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionResponse
 import uk.co.stefirby.budgetsandsubscriptions.exception.AccountNotFoundException
 import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionDateException
+import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionNotFoundException
 import uk.co.stefirby.budgetsandsubscriptions.model.Transaction
 import uk.co.stefirby.budgetsandsubscriptions.repository.AccountRepository
 import uk.co.stefirby.budgetsandsubscriptions.repository.TransactionRepository
@@ -204,4 +205,98 @@ class TransactionServiceDataJpaSpec extends Specification {
         then: "exception is thrown"
             thrown(AccountNotFoundException)
     }
+
+    //----------------------------
+    // getTransaction tests
+    //============================
+
+    def "BACKEND-003-AC-15: returns a single owned transaction"() {
+        given: "a transaction owned (via its account) by the authenticated user"
+            UUID userId = createUser(userRepository)
+            UUID userAccount1 = createAndPersistAccount1(userId, accountRepository)
+            UUID account1Transaction1 = createAndPersistPositiveTransaction(userAccount1, transactionRepository)
+            UUID account1Transaction2 = createAndPersistNegativeTransaction(userAccount1, transactionRepository)
+
+        when: "getTransaction is called for the transactions"
+            TransactionResponse transaction1Response =
+                transactionService.getTransaction(userId.toString(), userAccount1, account1Transaction1)
+            TransactionResponse transaction2Response =
+                transactionService.getTransaction(userId.toString(), userAccount1, account1Transaction2)
+
+        then: "the response populated from the correct transaction"
+            transaction1Response.id() == account1Transaction1
+            transaction2Response.id() == account1Transaction2
+    }
+
+    def "BACKEND-003-AC-16: throws AccountNotFoundException for a non-existent accountId"() {
+        given: "a valid user"
+            UUID userId1 = createUser(userRepository)
+
+        when: "getTransaction called with random accountId"
+            transactionService.getTransaction(userId1.toString(), UUID.randomUUID(), UUID.randomUUID())
+
+        then: "AccountNotFoundException thrown"
+            thrown(AccountNotFoundException)
+    }
+
+    def "BACKEND-003-AC-16: throws AccountNotFoundException for a non-owned accountId"() {
+        given: "valid user - user1"
+            UUID userId1 = createUser(userRepository)
+
+        and: "valid user with valid account - user2"
+            UUID userId2 = createUser2(userRepository)
+            UUID user2Account1 = createAndPersistAccount1(userId2, accountRepository)
+
+        when: "getTransaction called with user1 trying to access user2's account"
+            transactionService.getTransaction(userId1.toString(), user2Account1, UUID.randomUUID())
+
+        then: "AccountNotFoundException thrown"
+            thrown(AccountNotFoundException)
+    }
+
+    def "BACKEND-003-AC-16: throws TransactionNotFoundException for a non-existent transaction"() {
+        given: "a valid user and account"
+            UUID userId1 = createUser(userRepository)
+            UUID user1Account1 = createAndPersistAccount1(userId1, accountRepository)
+
+        when: "getTransaction called with random transactionId"
+            transactionService.getTransaction(userId1.toString(), user1Account1, UUID.randomUUID())
+
+        then: "TransactionNotFoundException thrown"
+            thrown(TransactionNotFoundException)
+    }
+
+    def "BACKEND-003-AC-16: throws TransactionNotFoundException for a non-owned transaction"() {
+        given: "valid user with valid account - user1"
+            UUID userId1 = createUser(userRepository)
+            UUID user1Account1 = createAndPersistAccount1(userId1, accountRepository)
+
+        and: "valid user with valid account and associated transaction - user2"
+            UUID userId2 = createUser2(userRepository)
+            UUID user2Account1 = createAndPersistAccount1(userId2, accountRepository)
+            UUID user2account1Transaction1 = createAndPersistPositiveTransaction(user2Account1, transactionRepository)
+
+        when: "getTransaction called with user1 trying to access transaction which exists on user2's account"
+            transactionService.getTransaction(userId1.toString(), user1Account1, user2account1Transaction1)
+
+        then: "TransactionNotFoundException thrown"
+            thrown(TransactionNotFoundException)
+    }
+
+    def "BACKEND-003-AC-16: throws TransactionNotFoundException for a transaction on a different account"() {
+        given: "valid user with two valid accounts - user1"
+            UUID userId1 = createUser(userRepository)
+            UUID user1Account1 = createAndPersistAccount1(userId1, accountRepository)
+            UUID user1Account2 = createAndPersistAccount2(userId1, accountRepository)
+
+        and: "account2 has a valid transaction"
+            UUID user1account2Transaction1 = createAndPersistPositiveTransaction(user1Account2, transactionRepository)
+
+        when: "getTransaction called with user1 trying to access transaction on a different account"
+            transactionService.getTransaction(userId1.toString(), user1Account1, user1account2Transaction1)
+
+        then: "TransactionNotFoundException thrown"
+            thrown(TransactionNotFoundException)
+    }
+
 }

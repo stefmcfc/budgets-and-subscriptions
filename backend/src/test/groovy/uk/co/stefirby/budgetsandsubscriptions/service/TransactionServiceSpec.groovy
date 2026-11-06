@@ -5,6 +5,7 @@ import spock.lang.Subject
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionCreateRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionResponse
 import uk.co.stefirby.budgetsandsubscriptions.exception.AccountNotFoundException
+import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionNotFoundException
 import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionDateException
 import uk.co.stefirby.budgetsandsubscriptions.model.Account
 import uk.co.stefirby.budgetsandsubscriptions.model.Transaction
@@ -150,5 +151,90 @@ class TransactionServiceSpec extends Specification {
 
         then: "getAllTransactions returns an empty list"
             transactionsList.size() == 0
+    }
+
+    def "BACKEND-003-AC-14: errors uniformly for a non-existent or non-owned account on list"() {
+        given: "valid user with UUID format"
+            UUID userId = UUID.randomUUID()
+            UUID userAccount = UUID.randomUUID()
+
+        and: "account not found"
+            mockAccountAccessService.verifyAccountOwnership(userId, userAccount) >> {
+                throw new AccountNotFoundException("Account Not Found") }
+
+        when: "getAllTransactions is called"
+            transactionService.getAllTransactions(userId.toString(), userAccount)
+
+        then: "exception is propagated"
+            thrown(AccountNotFoundException)
+
+        and: "transactionRepository is not called"
+            0 * mockTransactionRepository.findAllByAccountId(_ as UUID)
+    }
+
+    //----------------------------
+    // getTransaction tests
+    //============================
+
+    def "BACKEND-003-AC-15: returns a single owned transaction"() {
+        given: "a transaction owned (via its account) by the authenticated user"
+            UUID userId = UUID.randomUUID()
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+
+            Transaction mockTransaction = positiveTransaction(accountId)
+
+        when: "getTransaction is called"
+            TransactionResponse response =
+                transactionService.getTransaction(userId.toString(), accountId, transactionId)
+
+        then: "AccountAccessService is called and verifies the user / account"
+            1 * mockAccountAccessService.verifyAccountOwnership(userId, accountId)
+
+        and: "transactionRepository is called and gets a transaction"
+            1 * mockTransactionRepository.findByIdAndAccountId(transactionId, accountId) >>
+                Optional.of(mockTransaction)
+
+        and: "response carries expected mapped fields"
+            response.id() == mockTransaction.id
+            response.amount() == mockTransaction.amount
+            response.date() == mockTransaction.date
+            response.description() == mockTransaction.description
+    }
+
+    def "BACKEND-003-AC-16: AccountNotFoundException thrown for not-found/not-owned account"() {
+        given: "userId, accountId and transactionId"
+            UUID userId = UUID.randomUUID()
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+
+        and: "account not found"
+            mockAccountAccessService.verifyAccountOwnership(userId, accountId) >> {
+                throw new AccountNotFoundException("Account Not Found") }
+
+        when: "getTransaction is called"
+            transactionService.getTransaction(userId.toString(), accountId, transactionId)
+
+        then: "exception is propagated"
+            thrown(AccountNotFoundException)
+
+        and: "transactionRepository is not called"
+            0 * mockTransactionRepository.findByIdAndAccountId(_ as UUID, _ as UUID)
+    }
+
+    def "BACKEND-003-AC-16: TransactionNotFoundException thrown for cross-account/not-found transaction"() {
+        given: "transactionId that does not exist or belongs to a different account"
+            UUID userId = UUID.randomUUID()
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+
+        and: "findByIdAndAccountId returns empty"
+            mockTransactionRepository.findByIdAndAccountId(transactionId, accountId) >> Optional.empty()
+
+        when: "getTransaction is called"
+            transactionService.getTransaction(userId.toString(), accountId, transactionId)
+
+        then: "TransactionNotFoundException is thrown"
+            thrown(TransactionNotFoundException)
     }
 }

@@ -8,15 +8,15 @@ import org.springframework.transaction.annotation.Transactional;
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionCreateRequest;
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionResponse;
 import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionDateException;
+import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionNotFoundException;
 import uk.co.stefirby.budgetsandsubscriptions.model.Account;
 import uk.co.stefirby.budgetsandsubscriptions.model.Transaction;
 import uk.co.stefirby.budgetsandsubscriptions.repository.AccountRepository;
 import uk.co.stefirby.budgetsandsubscriptions.repository.TransactionRepository;
 import uk.co.stefirby.budgetsandsubscriptions.service.common.AccountAccessService;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -57,12 +57,27 @@ public class TransactionService {
         return mapTransactionToTransactionResponse(createdTransaction);
     }
 
+    @Transactional
     public List<TransactionResponse> getAllTransactions(String userId, UUID accountId) {
         // first make sure that the account belongs to the owner
         accountAccessService.verifyAccountOwnership(UUID.fromString(userId), accountId);
 
         List<Transaction> transactionList = transactionRepository.findAllByAccountId(accountId);
         return mapTransactionsToTransactionResponses(transactionList);
+    }
+
+    @Transactional
+    public TransactionResponse getTransaction(String userId, UUID accountId, UUID transactionId) {
+        // first make sure that the account belongs to the owner
+        accountAccessService.verifyAccountOwnership(UUID.fromString(userId), accountId);
+
+        Optional<Transaction> checkTransaction = transactionRepository.findByIdAndAccountId(transactionId, accountId);
+        if (checkTransaction.isEmpty()) {
+            LOG.debug("No transaction found with transactionId {} and accountId {}", transactionId, accountId);
+            throw new TransactionNotFoundException("Transaction not found");
+        }
+
+        return mapTransactionToTransactionResponse(checkTransaction.get());
     }
 
     //------------------
@@ -92,13 +107,6 @@ public class TransactionService {
             createdTransaction.getDate(),
             createdTransaction.getDescription(),
             createdTransaction.getRawDescription()
-        );
-    }
-
-    private TransactionResponse dummyTransactionResponse() {
-        return new TransactionResponse(
-            UUID.randomUUID(), BigDecimal.TEN, LocalDate.of(2026, 2, 2),
-            "description", "raw"
         );
     }
 }
