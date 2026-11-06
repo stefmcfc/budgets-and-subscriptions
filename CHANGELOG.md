@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-06
+
 ### Added
 - `GET /api/accounts/{accountId}/transactions/{transactionId}`: returns an owned transaction and
   responds `200` (`BACKEND-003-AC-15`). Returns `404` uniformly for a non-existent or non-owned
