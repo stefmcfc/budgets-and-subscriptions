@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "uk.co.stefirby"
-version = "0.12.0"
+version = "0.13.0"
 description = "budgets-and-subscriptions"
 
 // Centralized here (kotlin:S6624) rather than inline in the dependencies block below --

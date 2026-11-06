@@ -492,12 +492,12 @@ regression-guard role `BACKEND-002-AC-23` served for accounts.
 - [x] BACKEND-003-AC-14 [AUTO]: List returns 404 uniformly for not-found/not-owned account
 - [x] BACKEND-003-AC-11c [AUTO]: List returns 400 for a supplied-but-invalid `accountId`
 - [x] BACKEND-003-AC-11d [AUTO]: List returns 404 for an absent `accountId`
-- [ ] BACKEND-003-AC-15 [AUTO]: View returns an owned transaction, 200
-- [ ] BACKEND-003-AC-16 [AUTO]: View returns 404 uniformly for not-found/not-owned account or cross-account/not-found transaction
-- [ ] BACKEND-003-AC-11e [AUTO]: View returns 400 for a supplied-but-invalid `accountId`
-- [ ] BACKEND-003-AC-11f [AUTO]: View returns 404 for an absent `accountId`
-- [ ] BACKEND-003-AC-17a [AUTO]: View returns 400 for a supplied-but-invalid `transactionId`
-- [ ] BACKEND-003-AC-17b [AUTO]: View returns 404 for an absent `transactionId`
+- [x] BACKEND-003-AC-15 [AUTO]: View returns an owned transaction, 200
+- [x] BACKEND-003-AC-16 [AUTO]: View returns 404 uniformly for not-found/not-owned account or cross-account/not-found transaction
+- [x] BACKEND-003-AC-11e [AUTO]: View returns 400 for a supplied-but-invalid `accountId`
+- [x] BACKEND-003-AC-11f [AUTO]: View returns 404 for an absent `accountId`
+- [x] BACKEND-003-AC-17a [AUTO]: View returns 400 for a supplied-but-invalid `transactionId`
+- [x] BACKEND-003-AC-17b [AUTO]: View returns 404 for an absent `transactionId`
 - [ ] BACKEND-003-AC-18 [AUTO]: Valid update updates any subset of `amount`/`date`/`description`/`rawDescription`, returns 200, re-derives balance
 - [ ] BACKEND-003-AC-19 [AUTO]: Update returns 404 uniformly for not-found/not-owned account or cross-account/not-found transaction, no modification
 - [ ] BACKEND-003-AC-20 [AUTO]: Update with `amount`/`date`/`description`/`rawDescription` all absent returns 400, no modification

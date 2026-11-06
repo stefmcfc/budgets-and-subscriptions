@@ -103,6 +103,12 @@ public class GlobalExceptionHandler {
             .body(ApiError.of(ex.getMessage()));
     }
 
+    @ExceptionHandler(TransactionNotFoundException.class)
+    public ResponseEntity<ApiError> handleTransactionNotFoundException(TransactionNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(ApiError.of(ex.getMessage()));
+    }
+
     @ExceptionHandler(TransactionDateException.class)
     public ResponseEntity<ApiError> handleTransactionDateException(TransactionDateException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)

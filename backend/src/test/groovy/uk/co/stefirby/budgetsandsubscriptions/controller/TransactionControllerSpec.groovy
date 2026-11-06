@@ -8,6 +8,7 @@ import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionCreateRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionResponse
 import uk.co.stefirby.budgetsandsubscriptions.exception.AccountNotFoundException
 import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionDateException
+import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionNotFoundException
 import uk.co.stefirby.budgetsandsubscriptions.security.SecurityConfig
 import uk.co.stefirby.budgetsandsubscriptions.service.TransactionService
 
@@ -22,12 +23,18 @@ import static uk.co.stefirby.budgetsandsubscriptions.security.util.CookieHelper.
 class TransactionControllerSpec extends BaseControllerSpec {
 
     private static final String ENDPOINT_TRANSACTIONS = "/api/accounts/{accountId}/transactions"
+    private static final String ENDPOINT_TRANSACTIONS_ID = "/api/accounts/{accountId}/transactions/{transactionId}"
 
     @SpringBean
     TransactionService mockTransactionService = Mock()
 
-    String constructTransactionUri(String userId) {
-        return ENDPOINT_TRANSACTIONS.replace("{accountId}", userId)
+    String constructTransactionUri(UUID accountId) {
+        return ENDPOINT_TRANSACTIONS.replace("{accountId}", accountId.toString())
+    }
+
+    String constructTransactionUri(UUID accountId, UUID transactionId) {
+        return ENDPOINT_TRANSACTIONS_ID.replace("{accountId}", accountId.toString())
+            .replace("{transactionId}", transactionId.toString())
     }
 
     //---------------------------------
@@ -42,7 +49,7 @@ class TransactionControllerSpec extends BaseControllerSpec {
 
         when: "POST /api/accounts/{accountId}/transactions is requested"
             def body = objectMapper.writeValueAsString(request)
-            def result = mockMvc.perform(post(constructTransactionUri(accountId.toString()))
+            def result = mockMvc.perform(post(constructTransactionUri(accountId))
                 .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
@@ -73,7 +80,7 @@ class TransactionControllerSpec extends BaseControllerSpec {
 
         when: "POST /api/accounts/{accountId}/transactions is requested with that id"
             def body = objectMapper.writeValueAsString(request)
-            def result = mockMvc.perform(post(constructTransactionUri(accountId.toString()))
+            def result = mockMvc.perform(post(constructTransactionUri(accountId))
                 .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
@@ -96,7 +103,7 @@ class TransactionControllerSpec extends BaseControllerSpec {
 
         when: "POST /api/accounts/{accountId}/transactions is requested"
             def body = objectMapper.writeValueAsString(payload)
-            def result = mockMvc.perform(post(constructTransactionUri(accountId.toString()))
+            def result = mockMvc.perform(post(constructTransactionUri(accountId))
                 .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
@@ -130,7 +137,7 @@ class TransactionControllerSpec extends BaseControllerSpec {
 
         when: "POST /api/accounts/{accountId}/transactions is requested"
             def body = objectMapper.writeValueAsString(request)
-            def result = mockMvc.perform(post(constructTransactionUri(accountId.toString()))
+            def result = mockMvc.perform(post(constructTransactionUri(accountId))
                 .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
@@ -162,7 +169,7 @@ class TransactionControllerSpec extends BaseControllerSpec {
 
         when: "POST /api/accounts/{accountId}/transactions is requested"
             def body = objectMapper.writeValueAsString(payload)
-            def result = mockMvc.perform(post(constructTransactionUri(accountId.toString()))
+            def result = mockMvc.perform(post(constructTransactionUri(accountId))
                 .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
@@ -198,7 +205,7 @@ class TransactionControllerSpec extends BaseControllerSpec {
 
         when: "POST /api/accounts/{accountId}/transactions is requested"
             def body = objectMapper.writeValueAsString(request)
-            def result = mockMvc.perform(post(constructTransactionUri(accountId.toString()))
+            def result = mockMvc.perform(post(constructTransactionUri(accountId))
                 .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json")
                 .content(body))
@@ -268,7 +275,7 @@ class TransactionControllerSpec extends BaseControllerSpec {
             UUID accountId = UUID.randomUUID()
 
         when: "GET /api/accounts/{accountId}/transactions is requested with that account's id"
-            def result = mockMvc.perform(get(constructTransactionUri(accountId.toString()))
+            def result = mockMvc.perform(get(constructTransactionUri(accountId))
                 .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json"))
 
@@ -299,7 +306,7 @@ class TransactionControllerSpec extends BaseControllerSpec {
                 { throw new AccountNotFoundException("Account Not Found") }
 
         when: "GET /api/accounts/{accountId}/transactions is requested with that id"
-            def result = mockMvc.perform(get(constructTransactionUri(accountId.toString()))
+            def result = mockMvc.perform(get(constructTransactionUri(accountId))
                 .cookie(accessTokenCookie(user.jwt))
                 .contentType("application/json"))
 
@@ -329,7 +336,8 @@ class TransactionControllerSpec extends BaseControllerSpec {
             "non-uuid" | "not a uuid"
     }
 
-    def "BACKEND-003-AC-11d: returns 404 for an absent accountId on list"() {
+    @Unroll
+    def "BACKEND-003-AC-11d: returns 404 for an absent accountId on list - #scenario"() {
         given: "an authenticated user"
             AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
 
@@ -356,50 +364,150 @@ class TransactionControllerSpec extends BaseControllerSpec {
 
     def "BACKEND-003-AC-15: returns a single owned transaction"() {
         given: "a transaction owned (via its account) by the authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
 
         when: "GET /api/accounts/{accountId}/transactions/{transactionId} is requested with those ids"
+            def result = mockMvc.perform(get(constructTransactionUri(accountId, transactionId))
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json"))
 
-        then: "the response is 200 OK with that transaction"
+        then: "the response is 200 OK"
+            result.andExpect(status().isOk())
+
+        and: "the service got called with the authenticated user"
+            1 * mockTransactionService.getTransaction(user.id.toString(), accountId, transactionId) >> transactionResponse()
+
+        and: "the response is in the expected format"
+            String responseJson = result.andReturn().getResponse().getContentAsString()
+            TransactionResponse response = objectMapper.readValue(responseJson, TransactionResponse)
+            response.amount() == transactionResponse().amount()
+            response.date() == transactionResponse().date()
+            response.description() == transactionResponse().description()
+            response.rawDescription() == transactionResponse().rawDescription()
     }
 
-    def "BACKEND-003-AC-16: returns 404 uniformly for not-found/not-owned account or cross-account/not-found transaction"() {
-        given: "a non-existent or non-owned accountId, or a transactionId that does not exist or belongs to a different account"
+    @Unroll
+    def "BACKEND-003-AC-16: returns 404 uniformly for #scenario"() {
+        given: "authenticated user, account and transaction"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+
+        and: "service throws the relevant exception"
+            mockTransactionService.getTransaction(user.id.toString(), accountId, transactionId) >>
+                { throw thrownException }
 
         when: "GET /api/accounts/{accountId}/transactions/{transactionId} is requested with that combination"
+            def result = mockMvc.perform(get(constructTransactionUri(accountId, transactionId))
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json"))
 
         then: "the response is 404 Not Found in every case"
+            result.andExpect(status().isNotFound())
+
+        where:
+            scenario                              | thrownException
+            "not-found/not-owned account"         | new AccountNotFoundException("Account Not Found")
+            "cross-account/not-found transaction" | new TransactionNotFoundException("Transaction Not Found")
     }
 
-    def "BACKEND-003-AC-11e: returns 400 for a supplied-but-invalid accountId on view"() {
+    @Unroll
+    def "BACKEND-003-AC-11e: returns 400 for a supplied-but-invalid accountId on view - #scenario"() {
         given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID transactionId = UUID.randomUUID()
 
         when: "GET /api/accounts/{accountId}/transactions/{transactionId} is requested with an accountId that is not a UUID"
+            String uri = "/api/accounts/" + accountId + "/transactions/" + transactionId.toString()
+            def result = mockMvc.perform(get(uri)
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json"))
 
         then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
+
+        and: "the service is not called"
+            0 * mockTransactionService.getTransaction(_ as String, _ as UUID, _ as UUID)
+
+        where:
+            scenario   | accountId
+            "null"     | null
+            "non-uuid" | "not a uuid"
     }
 
-    def "BACKEND-003-AC-11f: returns 404 for an absent accountId on view"() {
+    @Unroll
+    def "BACKEND-003-AC-11f: returns 404 for an absent accountId on view - #scenario"() {
         given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID transactionId = UUID.randomUUID()
 
         when: "GET /api/accounts/{accountId}/transactions/{transactionId} is requested with an accountId that is empty or blank"
+            String uri = "/api/accounts/" + accountId + "/transactions/" + transactionId.toString()
+            def result = mockMvc.perform(get(uri)
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json"))
 
         then: "the response is 404 Not Found"
+            result.andExpect(status().isNotFound())
+
+        and: "the service is not called"
+            0 * mockTransactionService.getTransaction(_ as String, _ as UUID, _ as UUID)
+
+        where:
+            scenario     | accountId
+            "empty"      | ""
+            "blank"      | "     "
     }
 
-    def "BACKEND-003-AC-17a: returns 400 for a supplied-but-invalid transactionId on view"() {
-        given: "an authenticated user and an owned account"
 
-        when: "GET /api/accounts/{accountId}/transactions/{transactionId} is requested with a transactionId that is not a UUID"
+    @Unroll
+    def "BACKEND-003-AC-17a: returns 400 for a supplied-but-invalid transactionId on view - #scenario"() {
+        given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+
+        when: "GET /api/accounts/{accountId}/transactions/{transactionId} is requested with an accountId that is not a UUID"
+            String uri = "/api/accounts/" + accountId.toString() + "/transactions/" + transactionId
+            def result = mockMvc.perform(get(uri)
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json"))
 
         then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
+
+        and: "the service is not called"
+            0 * mockTransactionService.getTransaction(_ as String, _ as UUID, _ as UUID)
+
+        where:
+            scenario   | transactionId
+            "null"     | null
+            "non-uuid" | "not a uuid"
     }
 
-    def "BACKEND-003-AC-17b: returns 404 for an absent transactionId on view"() {
-        given: "an authenticated user and an owned account"
+    @Unroll
+    def "BACKEND-003-AC-17b: returns 404 for an absent transactionId on view - #scenario"() {
+        given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
 
-        when: "GET /api/accounts/{accountId}/transactions/{transactionId} is requested with a transactionId that is empty or blank"
+        when: "GET /api/accounts/{accountId}/transactions/{transactionId} is requested with an accountId that is empty or blank"
+            String uri = "/api/accounts/" + accountId.toString() + "/transactions/" + transactionId
+            def result = mockMvc.perform(get(uri)
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json"))
 
         then: "the response is 404 Not Found"
+            result.andExpect(status().isNotFound())
+
+        and: "the service is not called"
+            0 * mockTransactionService.getTransaction(_ as String, _ as UUID, _ as UUID)
+
+        where:
+            scenario     | transactionId
+            "empty"      | ""
+            "blank"      | "     "
     }
 
     //---------------------------------

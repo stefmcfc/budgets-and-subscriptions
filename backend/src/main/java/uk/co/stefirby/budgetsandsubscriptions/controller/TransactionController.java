@@ -37,4 +37,12 @@ public class TransactionController {
         List<TransactionResponse> transactions = transactionService.getAllTransactions(userId, accountId);
         return ResponseEntity.ok(transactions);
     }
+
+    @GetMapping("/{transactionId}")
+    public ResponseEntity<TransactionResponse> getTransaction(@PathVariable("accountId") UUID accountId,
+                                                              @PathVariable("transactionId") UUID transactionId,
+                                                              @AuthenticationPrincipal String userId) {
+        TransactionResponse response = transactionService.getTransaction(userId, accountId, transactionId);
+        return ResponseEntity.ok(response);
+    }
 }
