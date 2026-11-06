@@ -12,6 +12,7 @@ import uk.co.stefirby.budgetsandsubscriptions.repository.AccountRepository
 import uk.co.stefirby.budgetsandsubscriptions.service.common.AccountAccessService
 
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountConstants.*
+import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountEntityHelper.*
 
 class AccountServiceSpec extends Specification {
 
@@ -35,27 +36,6 @@ class AccountServiceSpec extends Specification {
         mockAccount.openedOn >> request.openedOn()
         mockAccount.openingBalance >> request.openingBalance()
         mockAccount.userId >> userId
-    }
-
-    Account buildAccount1(UUID userId) {
-        return new Account(
-            userId,
-            ACCOUNT_BANK_NAME,
-            ACCOUNT_ACCOUNT_NAME,
-            ACCOUNT_OPENED_ON,
-            ACCOUNT_OPENING_BALANCE,
-            AccountType.CURRENT
-        )
-    }
-    Account buildAccount2(UUID userId) {
-        return new Account(
-            userId,
-            ACCOUNT_BANK_NAME_1,
-            ACCOUNT_ACCOUNT_NAME_1,
-            ACCOUNT_OPENED_ON,
-            ACCOUNT_OPENING_BALANCE,
-            AccountType.CURRENT
-        )
     }
 
     //----------------------
@@ -101,7 +81,7 @@ class AccountServiceSpec extends Specification {
             List<AccountResponse> response = accountService.getAccounts(userId)
 
         then: "findByUserId is called for that account"
-            1 * mockAccountRepository.findByUserId(uuid) >> List.of(buildAccount1(uuid), buildAccount2(uuid))
+            1 * mockAccountRepository.findByUserId(uuid) >> List.of(account1(uuid), account2(uuid))
 
         and: "response returns 2 accounts"
             response.size() == 2
@@ -130,7 +110,7 @@ class AccountServiceSpec extends Specification {
         given: "valid user with uuid format who has an account"
             UUID userId = UUID.randomUUID()
             UUID accountId = UUID.randomUUID()
-            mockAccountAccessService.getAccountForUser(userId, accountId) >> buildAccount1(userId)
+            mockAccountAccessService.getAccountForUser(userId, accountId) >> account1(userId)
 
         when: "getAccounts is called for that user and account id"
             AccountResponse response = accountService.getAccount(userId.toString(), accountId)
@@ -157,7 +137,7 @@ class AccountServiceSpec extends Specification {
             AccountResponse response = accountService.updateAccount(userId.toString(), accountId, accountUpdateRequest)
 
         then: "find and update account performed on repository"
-            1 * mockAccountAccessService.getAccountForUser(userId, accountId) >> buildAccount1(userId)
+            1 * mockAccountAccessService.getAccountForUser(userId, accountId) >> account1(userId)
             1 * mockAccountRepository.saveAndFlush(_ as Account) >> { Account a -> a }
 
         and: "response is returned with updated fields for those in the request and unchanged for the others"
@@ -181,7 +161,7 @@ class AccountServiceSpec extends Specification {
         given: "an account owned by the authenticated user"
             UUID userId = UUID.randomUUID()
             UUID accountId = UUID.randomUUID()
-            Account account = buildAccount1(userId)
+            Account account = account1(userId)
             mockAccountAccessService.getAccountForUser(userId, accountId) >> account
 
         when: "deleteAccount is called"

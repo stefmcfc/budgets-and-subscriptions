@@ -261,44 +261,93 @@ class TransactionControllerSpec extends BaseControllerSpec {
     // GET /api/accounts/{accountId}/transactions tests
     //=================================
 
-    def "BACKEND-003-AC-12: lists every transaction for an owned account"() {
-        given: "an account owned by the authenticated user with several transactions recorded against it"
+    @Unroll
+    def "BACKEND-003-AC-12 / BACKEND-003-AC-13: #scenario"() {
+        given: "an account owned by the authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
 
         when: "GET /api/accounts/{accountId}/transactions is requested with that account's id"
+            def result = mockMvc.perform(get(constructTransactionUri(accountId.toString()))
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json"))
 
-        then: "the response is 200 OK containing every transaction for that account"
-    }
+        then: "the response is 200 OK"
+            result.andExpect(status().isOk())
 
-    def "BACKEND-003-AC-13: returns an empty list for an owned account with no transactions"() {
-        given: "an account owned by the authenticated user with no transactions"
+        and: "the service got called with the authenticated user"
+            1 * mockTransactionService.getAllTransactions(user.id.toString(), accountId) >> getAllTransactionsResponse
 
-        when: "GET /api/accounts/{accountId}/transactions is requested with that account's id"
+        and: "correct number of transactions for that account"
+            String responseJson = result.andReturn().getResponse().getContentAsString()
+            List<TransactionResponse> response =
+                objectMapper.readValue(responseJson, TransactionResponse[].class).toList()
+            response.size() == expectedSize
 
-        then: "the response is 200 OK with an empty list"
+        where:
+            scenario                                                          | getAllTransactionsResponse                            | expectedSize
+            "lists every transaction for an owned account"                    | List.of(transactionResponse(), transactionResponse()) | 2
+            "returns an empty list for an owned account with no transactions" | List.of()                                             | 0
     }
 
     def "BACKEND-003-AC-14: returns 404 uniformly for a non-existent or non-owned account on list"() {
         given: "either a non-existent account id, or an account id owned by a different user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+
+            mockTransactionService.getAllTransactions(user.id.toString(), accountId) >>
+                { throw new AccountNotFoundException("Account Not Found") }
 
         when: "GET /api/accounts/{accountId}/transactions is requested with that id"
+            def result = mockMvc.perform(get(constructTransactionUri(accountId.toString()))
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json"))
 
         then: "the response is 404 Not Found in both cases"
+            result.andExpect(status().isNotFound())
     }
 
-    def "BACKEND-003-AC-11c: returns 400 for a supplied-but-invalid accountId on list"() {
+    @Unroll
+    def "BACKEND-003-AC-11c: returns 400 for a supplied-but-invalid accountId on list - #scenario"() {
         given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
 
         when: "GET /api/accounts/{accountId}/transactions is requested with an accountId that is not a UUID"
+            def result = mockMvc.perform(get("/api/accounts/" + accountId + "/transactions")
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json"))
 
         then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
+
+        and: "service is not called"
+            0 * mockTransactionService.getAllTransactions(_ as String, _ as UUID)
+
+        where:
+            scenario   | accountId
+            "null"     | null
+            "non-uuid" | "not a uuid"
     }
 
     def "BACKEND-003-AC-11d: returns 404 for an absent accountId on list"() {
         given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
 
         when: "GET /api/accounts/{accountId}/transactions is requested with an accountId that is empty or blank"
+            def result = mockMvc.perform(get("/api/accounts/" + accountId + "/transactions")
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json"))
 
         then: "the response is 404 Not Found"
+            result.andExpect(status().isNotFound())
+
+        and: "service is not called"
+            0 * mockTransactionService.getAllTransactions(_ as String, _ as UUID)
+
+        where:
+            scenario     | accountId
+            "empty"      | ""
+            "blank"      | "     "
     }
 
     //---------------------------------

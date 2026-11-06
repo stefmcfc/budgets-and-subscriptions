@@ -487,11 +487,11 @@ regression-guard role `BACKEND-002-AC-23` served for accounts.
 - [x] BACKEND-003-AC-10 [AUTO]: Missing or too-early `date` on create returns 400, no transaction created
 - [x] BACKEND-003-AC-11a [AUTO]: Create returns 400 for a supplied-but-invalid `accountId`
 - [x] BACKEND-003-AC-11b [AUTO]: Create returns 404 for an absent `accountId`
-- [ ] BACKEND-003-AC-12 [AUTO]: List returns every transaction for an owned account, 200
-- [ ] BACKEND-003-AC-13 [AUTO]: List returns an empty list when the account has no transactions
-- [ ] BACKEND-003-AC-14 [AUTO]: List returns 404 uniformly for not-found/not-owned account
-- [ ] BACKEND-003-AC-11c [AUTO]: List returns 400 for a supplied-but-invalid `accountId`
-- [ ] BACKEND-003-AC-11d [AUTO]: List returns 404 for an absent `accountId`
+- [x] BACKEND-003-AC-12 [AUTO]: List returns every transaction for an owned account, 200
+- [x] BACKEND-003-AC-13 [AUTO]: List returns an empty list when the account has no transactions
+- [x] BACKEND-003-AC-14 [AUTO]: List returns 404 uniformly for not-found/not-owned account
+- [x] BACKEND-003-AC-11c [AUTO]: List returns 400 for a supplied-but-invalid `accountId`
+- [x] BACKEND-003-AC-11d [AUTO]: List returns 404 for an absent `accountId`
 - [ ] BACKEND-003-AC-15 [AUTO]: View returns an owned transaction, 200
 - [ ] BACKEND-003-AC-16 [AUTO]: View returns 404 uniformly for not-found/not-owned account or cross-account/not-found transaction
 - [ ] BACKEND-003-AC-11e [AUTO]: View returns 400 for a supplied-but-invalid `accountId`

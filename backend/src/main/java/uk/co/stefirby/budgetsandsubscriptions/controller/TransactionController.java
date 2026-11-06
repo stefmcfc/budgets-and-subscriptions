@@ -9,6 +9,7 @@ import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionCreateRequest;
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionResponse;
 import uk.co.stefirby.budgetsandsubscriptions.service.TransactionService;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -30,4 +31,10 @@ public class TransactionController {
             .body(response);
     }
 
+    @GetMapping
+    public ResponseEntity<List<TransactionResponse>> getAllTransactions(@PathVariable("accountId") UUID accountId,
+                                                                        @AuthenticationPrincipal String userId) {
+        List<TransactionResponse> transactions = transactionService.getAllTransactions(userId, accountId);
+        return ResponseEntity.ok(transactions);
+    }
 }

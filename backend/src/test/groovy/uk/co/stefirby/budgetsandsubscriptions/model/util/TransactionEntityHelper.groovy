@@ -3,12 +3,31 @@ package uk.co.stefirby.budgetsandsubscriptions.model.util
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionCreateRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionResponse
 import uk.co.stefirby.budgetsandsubscriptions.model.Transaction
+import uk.co.stefirby.budgetsandsubscriptions.repository.TransactionRepository
 
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.TransactionConstants.*
 
 class TransactionEntityHelper {
 
     // Transaction
+
+    static UUID createAndPersistPositiveTransaction(UUID accountId, TransactionRepository transactionRepository) {
+        Transaction transaction = positiveTransaction(accountId)
+        Transaction createdTransaction = transactionRepository.saveAndFlush(transaction)
+        return createdTransaction.id
+    }
+
+    static UUID createAndPersistNegativeTransaction(UUID accountId, TransactionRepository transactionRepository) {
+        Transaction transaction = negativeTransaction(accountId)
+        Transaction createdTransaction = transactionRepository.saveAndFlush(transaction)
+        return createdTransaction.id
+    }
+
+    static UUID createAndPersistZeroTransaction(UUID accountId, TransactionRepository transactionRepository) {
+        Transaction transaction = zeroTransaction(accountId)
+        Transaction createdTransaction = transactionRepository.saveAndFlush(transaction)
+        return createdTransaction.id
+    }
 
     static Transaction positiveTransaction(UUID accountId) {
         return new Transaction(accountId, TRANSACTION_AMOUNT_POSITIVE, TRANSACTION_DATE_AFTER_OPENED_ON,

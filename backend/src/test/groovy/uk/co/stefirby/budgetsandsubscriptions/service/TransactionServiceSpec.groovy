@@ -29,6 +29,10 @@ class TransactionServiceSpec extends Specification {
             mockAccountAccessService, mockAccountRepository, mockTransactionRepository)
     }
 
+    //----------------------------
+    // addTransaction tests
+    //============================
+
     def "BACKEND-003-AC-06: given user and valid TransactionCreateRequest then addTransaction creates a transaction"() {
         given: "valid user with UUID format"
             UUID userId = UUID.randomUUID()
@@ -100,5 +104,51 @@ class TransactionServiceSpec extends Specification {
 
         and: "account is not updated"
             0 * mockAccountRepository.saveAndFlush(_ as Account)
+    }
+
+    //----------------------------
+    // getAllTransactions tests
+    //============================
+
+    def "BACKEND-003-AC-12: lists every transaction for an owned account"() {
+        given: "an account owned by the authenticated user with several transactions recorded against it"
+            UUID userId = UUID.randomUUID()
+            UUID accountId = UUID.randomUUID()
+            Transaction transaction1 = positiveTransaction(accountId)
+            Transaction transaction2 = negativeTransaction(accountId)
+
+        when: "getAllTransactions is called"
+            List<TransactionResponse> transactionsList =
+                transactionService.getAllTransactions(userId.toString(), accountId)
+
+        then: "AccountAccessService is called and verifies the user / account"
+            1 * mockAccountAccessService.verifyAccountOwnership(_ as UUID, accountId)
+
+        and: "TransactionRepository is called and returns transactions"
+            1 * mockTransactionRepository.findAllByAccountId(accountId) >> List.of(transaction1, transaction2)
+
+        and: "getAllTransactions returns the transaction responses"
+            transactionsList.size() == 2
+            transactionsList.any {it.id() == transaction1.id}
+            transactionsList.any {it.id() == transaction2.id}
+    }
+
+    def "BACKEND-003-AC-13: returns an empty list for an owned account with no transactions"() {
+        given: "an account owned by the authenticated user with no transactions"
+            UUID userId = UUID.randomUUID()
+            UUID accountId = UUID.randomUUID()
+
+        when: "getAllTransactions is called"
+            List<TransactionResponse> transactionsList =
+                transactionService.getAllTransactions(userId.toString(), accountId)
+
+        then: "AccountAccessService is called and verifies the user / account"
+            1 * mockAccountAccessService.verifyAccountOwnership(_ as UUID, accountId)
+
+        and: "TransactionRepository is called and returns transactions"
+            1 * mockTransactionRepository.findAllByAccountId(accountId) >> List.of()
+
+        then: "getAllTransactions returns an empty list"
+            transactionsList.size() == 0
     }
 }
