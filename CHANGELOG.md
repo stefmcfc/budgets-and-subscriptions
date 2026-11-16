@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-16
+
+### Added
+- `PATCH /api/accounts/{accountId}/transactions/{transactionId}`: a genuine partial update — any
+  subset of `amount`, `date`, `description`, and `rawDescription` may be supplied, and any field
+  omitted is left unchanged on the transaction, with the owning account's `balance` re-derived by
+  reversing the old `amount` and applying the new one (`BACKEND-003-AC-18`). Returns `404`
+  uniformly for a non-existent or non-owned account, or a `transactionId` that doesn't exist or
+  belongs to a different account (`AC-19`), reusing the existing malformed/absent-id handling
+  (`AC-11g`, `AC-11h`, `AC-17c`, `AC-17d`). Rejects a request with all four fields absent (`AC-20`)
+  and a present-but-blank `description` (`AC-21`), enforced via a derived `@AssertTrue`-annotated
+  boolean method on `TransactionUpdateRequest`. Rejects a present-but-too-early `date` (`AC-22`).
+  The owning account association is not editable via this endpoint — enforced structurally, since
+  `TransactionUpdateRequest` has no field for it (`AC-23`). A present-but-blank `rawDescription`
+  clears it to `null`, distinct from omitting it entirely (`AC-23a`).
+
 ## [0.13.0] - 2026-11-06
 
 ### Added

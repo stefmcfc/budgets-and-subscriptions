@@ -2,6 +2,7 @@ package uk.co.stefirby.budgetsandsubscriptions.model.util
 
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionCreateRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionResponse
+import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionUpdateRequest
 import uk.co.stefirby.budgetsandsubscriptions.model.Transaction
 import uk.co.stefirby.budgetsandsubscriptions.repository.TransactionRepository
 
@@ -56,11 +57,37 @@ class TransactionEntityHelper {
             TRANSACTION_DESCRIPTION, TRANSACTION_RAW_DESCRIPTION)
     }
 
+    // TransactionUpdateRequest
+
+    static TransactionUpdateRequest transactionUpdateRequest() {
+        return new TransactionUpdateRequest(TRANSACTION_AMOUNT_POSITIVE, TRANSACTION_DATE_AFTER_OPENED_ON,
+            TRANSACTION_DESCRIPTION, TRANSACTION_RAW_DESCRIPTION)
+    }
+
+    static TransactionUpdateRequest transactionUpdateRequestBeforeOpenedOn() {
+        return new TransactionUpdateRequest(TRANSACTION_AMOUNT_POSITIVE, TRANSACTION_DATE_BEFORE_OPENED_ON,
+            TRANSACTION_DESCRIPTION, TRANSACTION_RAW_DESCRIPTION)
+    }
+
+    static TransactionUpdateRequest transactionUpdateRequestBlankDescription() {
+        return new TransactionUpdateRequest(TRANSACTION_AMOUNT_POSITIVE, TRANSACTION_DATE_AFTER_OPENED_ON,
+            "", TRANSACTION_RAW_DESCRIPTION)
+    }
+
+    static TransactionUpdateRequest transactionUpdateRequestBlankRawDescription() {
+        return new TransactionUpdateRequest(TRANSACTION_AMOUNT_POSITIVE, TRANSACTION_DATE_AFTER_OPENED_ON,
+            TRANSACTION_DESCRIPTION, "")
+    }
+
     // TransactionResponse
 
     static TransactionResponse transactionResponse() {
         return new TransactionResponse(UUID.randomUUID(), TRANSACTION_AMOUNT_POSITIVE, TRANSACTION_DATE_AFTER_OPENED_ON,
             TRANSACTION_DESCRIPTION, TRANSACTION_RAW_DESCRIPTION)
+    }
+    static TransactionResponse transactionResponseWithNullRawDescription() {
+        return new TransactionResponse(UUID.randomUUID(), TRANSACTION_AMOUNT_POSITIVE, TRANSACTION_DATE_AFTER_OPENED_ON,
+            TRANSACTION_DESCRIPTION, null)
     }
 
 }

@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionCreateRequest;
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionResponse;
+import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionUpdateRequest;
 import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionDateException;
 import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionNotFoundException;
 import uk.co.stefirby.budgetsandsubscriptions.model.Account;
@@ -15,6 +16,8 @@ import uk.co.stefirby.budgetsandsubscriptions.repository.AccountRepository;
 import uk.co.stefirby.budgetsandsubscriptions.repository.TransactionRepository;
 import uk.co.stefirby.budgetsandsubscriptions.service.common.AccountAccessService;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -42,11 +45,8 @@ public class TransactionService {
         // first make sure that the account belongs to the owner
         Account userAccount = accountAccessService.getAccountForUser(UUID.fromString(userId), accountId);
 
-        if (transactionCreateRequest.date().isBefore(userAccount.getOpenedOn())) {
-            LOG.debug("Transaction date {} is before Account openedOn {}",
-                transactionCreateRequest.date(), userAccount.getOpenedOn());
-            throw new TransactionDateException("Transaction date before Account openedOn");
-        }
+        // make sure transaction date is not before account opening date
+        checkTransactionDateNotBeforeAccountOpeningDate(transactionCreateRequest.date(), userAccount.getOpenedOn());
 
         Transaction transaction = createTransaction(accountId, transactionCreateRequest);
         Transaction createdTransaction = transactionRepository.saveAndFlush(transaction);
@@ -71,13 +71,51 @@ public class TransactionService {
         // first make sure that the account belongs to the owner
         accountAccessService.verifyAccountOwnership(UUID.fromString(userId), accountId);
 
-        Optional<Transaction> checkTransaction = transactionRepository.findByIdAndAccountId(transactionId, accountId);
-        if (checkTransaction.isEmpty()) {
-            LOG.debug("No transaction found with transactionId {} and accountId {}", transactionId, accountId);
-            throw new TransactionNotFoundException("Transaction not found");
+        Transaction transaction = getTransactionForVerifiedUserAndAccount(transactionId, accountId);
+
+        return mapTransactionToTransactionResponse(transaction);
+    }
+
+    @Transactional
+    public TransactionResponse updateTransaction(String userId,
+                                                 UUID accountId,
+                                                 UUID transactionId,
+                                                 TransactionUpdateRequest transactionUpdateRequest) {
+
+        // first make sure that the account belongs to the owner - also get it in case balance needs updating
+        Account userAccount = accountAccessService.getAccountForUser(UUID.fromString(userId), accountId);
+
+        // get the original transaction
+        Transaction transaction = getTransactionForVerifiedUserAndAccount(transactionId, accountId);
+
+        boolean amountProvided = transactionUpdateRequest.amount() != null;
+
+        if (transactionUpdateRequest.date() != null) {
+            // make sure transaction date is not before account opening date
+            checkTransactionDateNotBeforeAccountOpeningDate(transactionUpdateRequest.date(), userAccount.getOpenedOn());
+            transaction.setDate(transactionUpdateRequest.date());
+        }
+        if (amountProvided) {
+            BigDecimal updateAmount = transactionUpdateRequest.amount();
+            adjustAccountBalance(updateAmount, transaction.getAmount(), userAccount);
+            transaction.setAmount(updateAmount);
+        }
+        if (transactionUpdateRequest.description() != null && !transactionUpdateRequest.description().isBlank()) {
+            transaction.setDescription(transactionUpdateRequest.description());
+        }
+        if (transactionUpdateRequest.rawDescription() != null) {
+            if (transactionUpdateRequest.rawDescription().isBlank()) {
+                transaction.setRawDescription(null);
+            } else {
+                transaction.setRawDescription(transactionUpdateRequest.rawDescription());
+            }
         }
 
-        return mapTransactionToTransactionResponse(checkTransaction.get());
+        if (amountProvided) {
+            accountRepository.saveAndFlush(userAccount);
+        }
+
+        return mapTransactionToTransactionResponse(transactionRepository.saveAndFlush(transaction));
     }
 
     //------------------
@@ -108,5 +146,32 @@ public class TransactionService {
             createdTransaction.getDescription(),
             createdTransaction.getRawDescription()
         );
+    }
+
+    private static void adjustAccountBalance(BigDecimal updatedAmount, BigDecimal originalAmount, Account userAccount) {
+        // update account balance
+        BigDecimal newBalance = userAccount.getBalance()
+            .subtract(originalAmount)
+            .add(updatedAmount);
+
+        userAccount.setBalance(newBalance);
+    }
+
+    private static void checkTransactionDateNotBeforeAccountOpeningDate(
+        LocalDate transactionDate, LocalDate accountOpeningDate) {
+        if (transactionDate.isBefore(accountOpeningDate)) {
+            LOG.debug("Transaction date {} is before Account openedOn {}",
+                transactionDate, accountOpeningDate);
+            throw new TransactionDateException("Transaction date before Account openedOn");
+        }
+    }
+
+    private Transaction getTransactionForVerifiedUserAndAccount(UUID transactionId, UUID accountId) {
+        Optional<Transaction> checkTransaction = transactionRepository.findByIdAndAccountId(transactionId, accountId);
+        if (checkTransaction.isEmpty()) {
+            LOG.debug("No transaction found with transactionId {} and accountId {}", transactionId, accountId);
+            throw new TransactionNotFoundException("Transaction not found");
+        }
+        return checkTransaction.get();
     }
 }

@@ -2,8 +2,10 @@ package uk.co.stefirby.budgetsandsubscriptions.service
 
 import spock.lang.Specification
 import spock.lang.Subject
+import spock.lang.Unroll
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionCreateRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionResponse
+import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionUpdateRequest
 import uk.co.stefirby.budgetsandsubscriptions.exception.AccountNotFoundException
 import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionNotFoundException
 import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionDateException
@@ -12,6 +14,8 @@ import uk.co.stefirby.budgetsandsubscriptions.model.Transaction
 import uk.co.stefirby.budgetsandsubscriptions.repository.AccountRepository
 import uk.co.stefirby.budgetsandsubscriptions.repository.TransactionRepository
 import uk.co.stefirby.budgetsandsubscriptions.service.common.AccountAccessService
+
+import java.time.LocalDate
 
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountEntityHelper.*
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.TransactionEntityHelper.*
@@ -237,4 +241,164 @@ class TransactionServiceSpec extends Specification {
         then: "TransactionNotFoundException is thrown"
             thrown(TransactionNotFoundException)
     }
+
+    //----------------------------
+    // updateTransaction tests
+    //============================
+
+    @Unroll
+    def "BACKEND-003-AC-18: updates an owned transaction when the request contains #scenario"() {
+        given: "a transaction owned (via its account) by the authenticated user"
+            UUID userId = UUID.randomUUID()
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+            Account account = account1(userId)
+            Transaction transaction = positiveTransaction(accountId)
+
+        and: "an update request with at least one of amount, date, description, or rawDescription present"
+            TransactionUpdateRequest updateRequest =
+                new TransactionUpdateRequest(newAmount, newDate, newDescription, newRawDescription)
+
+        and: "AccountAccessService returns an account"
+            mockAccountAccessService.getAccountForUser(userId, accountId) >> account
+
+        and: "Transaction is found"
+            mockTransactionRepository.findByIdAndAccountId(transactionId, accountId) >> Optional.of(transaction)
+
+        when: "updateTransaction is called"
+            TransactionResponse response =
+                transactionService.updateTransaction(userId.toString(), accountId, transactionId, updateRequest)
+
+        then: "transaction is updated"
+            1 * mockTransactionRepository.saveAndFlush(_ as Transaction) >> { Transaction t -> t }
+
+        and: "when amount is provided, new value is updated in Account and present in the response"
+            if (newAmount != null) {
+                response.amount() == newAmount
+                1 * mockAccountRepository.saveAndFlush(_ as Account)
+            } else {
+                response.amount() == transaction.amount
+                0 * mockAccountRepository.saveAndFlush(_ as Account)
+            }
+
+        and: "response is returned with updated fields for those in the request and unchanged for the others"
+            if (newDate != null) {
+                response.date() == newDate
+            } else {
+                response.date() == transaction.date
+            }
+            if (newDescription != null) {
+                response.description() == newDescription
+            } else {
+                response.description() == transaction.description
+            }
+            if (newRawDescription != null) {
+                response.rawDescription() == newRawDescription
+            } else {
+                response.rawDescription() == transaction.rawDescription
+            }
+
+        where:
+            scenario               | newAmount      | newDate                   | newDescription    | newRawDescription
+            "amount only"          | BigDecimal.TEN | null                      | null              | null
+            "date only"            | null           | LocalDate.of(2026, 11, 1) | null              | null
+            "description only"     | null           | null                      | "new description" | null
+            "raw description only" | null           | null                      | null              | "new raw description"
+            "all 4 fields"         | BigDecimal.TEN | LocalDate.of(2026, 11, 1) | "new description" | "new raw description"
+    }
+
+    def "BACKEND-003-AC-19: AccountNotFoundException thrown for not-found/not-owned account"() {
+        given: "userId, accountId and transactionId"
+            UUID userId = UUID.randomUUID()
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+
+        and: "a valid update request"
+            TransactionUpdateRequest updateRequest = transactionUpdateRequest()
+
+        and: "account not found"
+            mockAccountAccessService.getAccountForUser(userId, accountId) >> {
+                throw new AccountNotFoundException("Account Not Found") }
+
+        when: "update is called"
+            transactionService.updateTransaction(userId.toString(), accountId, transactionId, updateRequest)
+
+        then: "exception is propagated"
+            thrown(AccountNotFoundException)
+
+        and: "transactionRepository is not called"
+            0 * mockTransactionRepository.findByIdAndAccountId(_ as UUID, _ as UUID)
+    }
+
+    def "BACKEND-003-AC-19: TransactionNotFoundException thrown for cross-account/not-found transaction"() {
+        given: "transactionId that does not exist or belongs to a different account"
+            UUID userId = UUID.randomUUID()
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+
+        and: "a valid update request"
+            TransactionUpdateRequest updateRequest = transactionUpdateRequest()
+
+        and: "findByIdAndAccountId returns empty"
+            mockTransactionRepository.findByIdAndAccountId(transactionId, accountId) >> Optional.empty()
+
+        when: "update is called"
+            transactionService.updateTransaction(userId.toString(), accountId, transactionId, updateRequest)
+
+        then: "TransactionNotFoundException is thrown"
+            thrown(TransactionNotFoundException)
+    }
+
+    def "BACKEND-003-AC-22: rejects an update with a present-but-too-early date"() {
+        given: "a transaction owned (via its account) by the authenticated user"
+            UUID userId = UUID.randomUUID()
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+            Account account = account1(userId)
+            Transaction transaction = positiveTransaction(accountId)
+
+        and: "an update request where date is present but earlier than the account's openedOn"
+            TransactionUpdateRequest updateRequest = transactionUpdateRequestBeforeOpenedOn()
+
+        and: "AccountAccessService returns an account"
+            mockAccountAccessService.getAccountForUser(userId, accountId) >> account
+
+        and: "Transaction is found"
+            mockTransactionRepository.findByIdAndAccountId(transactionId, accountId) >> Optional.of(transaction)
+
+        when: "updateTransaction is called"
+            transactionService.updateTransaction(userId.toString(), accountId, transactionId, updateRequest)
+
+        then: "TransactionDateException is thrown"
+            thrown(TransactionDateException)
+    }
+
+    def "BACKEND-003-AC-23a: clears rawDescription to null when present but blank on update"() {
+        given: "a transaction owned (via its account) by the authenticated user"
+            UUID userId = UUID.randomUUID()
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+            Account account = account1(userId)
+            Transaction transaction = positiveTransaction(accountId)
+
+        and: "an update request where rawDescription is present but blank"
+            TransactionUpdateRequest updateRequest = transactionUpdateRequestBlankRawDescription()
+
+        and: "AccountAccessService returns an account"
+            mockAccountAccessService.getAccountForUser(userId, accountId) >> account
+
+        and: "Transaction is found"
+            mockTransactionRepository.findByIdAndAccountId(transactionId, accountId) >> Optional.of(transaction)
+
+        when: "updateTransaction is called"
+            TransactionResponse response =
+                transactionService.updateTransaction(userId.toString(), accountId, transactionId, updateRequest)
+
+        then: "transaction is updated"
+            1 * mockTransactionRepository.saveAndFlush(_ as Transaction) >> { Transaction t -> t }
+
+        and: "the transaction's rawDescription is null"
+            response.rawDescription() == null
+    }
+
 }

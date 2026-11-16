@@ -7,6 +7,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionCreateRequest;
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionResponse;
+import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionUpdateRequest;
 import uk.co.stefirby.budgetsandsubscriptions.service.TransactionService;
 
 import java.util.List;
@@ -43,6 +44,15 @@ public class TransactionController {
                                                               @PathVariable("transactionId") UUID transactionId,
                                                               @AuthenticationPrincipal String userId) {
         TransactionResponse response = transactionService.getTransaction(userId, accountId, transactionId);
+        return ResponseEntity.ok(response);
+    }
+
+    @PatchMapping("/{transactionId}")
+    public ResponseEntity<TransactionResponse> updateTransaction(@PathVariable("accountId") UUID accountId,
+                                                                 @PathVariable("transactionId") UUID transactionId,
+                                                                 @Valid @RequestBody TransactionUpdateRequest requestBody,
+                                                                 @AuthenticationPrincipal String userId) {
+        TransactionResponse response = transactionService.updateTransaction(userId, accountId, transactionId, requestBody);
         return ResponseEntity.ok(response);
     }
 }

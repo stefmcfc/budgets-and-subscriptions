@@ -100,6 +100,33 @@ it's optional, not required, precisely because the entity never left the persist
 moment an entity genuinely is new or detached, that call stops being optional and starts being the
 actual mechanism.
 
+## The order of multiple `saveAndFlush()` calls inside one `@Transactional` method doesn't affect atomicity
+
+**Context**: `TransactionService.updateTransaction` saves the updated `Account` (new balance) before
+the updated `Transaction`, within one `@Transactional` method — raising the question of whether
+"account succeeds, transaction fails" could leave balance and transaction history out of sync, and
+whether swapping the order would protect against that.
+
+**Why order doesn't matter here**: `saveAndFlush` sends the SQL immediately but doesn't commit —
+commit only happens when the `@Transactional` method returns normally. If either call throws, the
+exception propagates out of the method, Spring's transactional proxy marks the transaction
+rollback-only, and the *whole* database transaction rolls back at the boundary — undoing any
+statement already flushed, regardless of which one ran first. Atomicity here comes from the
+transaction boundary, not from call order.
+
+**Two things this guarantee actually depends on**:
+- **The exception has to be unchecked.** Spring only auto-rolls-back on `RuntimeException`/`Error`
+  by default; a checked exception commits anyway unless `rollbackFor` is set. JPA/Hibernate
+  exceptions are all unchecked, so this holds for repository calls without any extra config.
+- **The method has to actually run through the Spring proxy** — called from outside the class
+  (e.g. controller → service), not via self-invocation on `this` within the same class, which
+  bypasses the AOP proxy and makes `@Transactional` a no-op silently.
+
+**General tell**: when reviewing a multi-write method and the instinct is "should I reorder these
+writes to be safer," check first whether both writes are already inside one `@Transactional`
+boundary with unchecked exceptions — if so, reordering fixes nothing; the real question is whether
+the transactional boundary and exception type actually hold, not which write goes first.
+
 ## `@Enumerated(EnumType.STRING)`, not `EnumType.ORDINAL`
 
 **Context**: `User.role` needed to map the `Role` enum (`USER`/`ADMIN`) to a database column.

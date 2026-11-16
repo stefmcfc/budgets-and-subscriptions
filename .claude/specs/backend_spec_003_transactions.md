@@ -498,17 +498,17 @@ regression-guard role `BACKEND-002-AC-23` served for accounts.
 - [x] BACKEND-003-AC-11f [AUTO]: View returns 404 for an absent `accountId`
 - [x] BACKEND-003-AC-17a [AUTO]: View returns 400 for a supplied-but-invalid `transactionId`
 - [x] BACKEND-003-AC-17b [AUTO]: View returns 404 for an absent `transactionId`
-- [ ] BACKEND-003-AC-18 [AUTO]: Valid update updates any subset of `amount`/`date`/`description`/`rawDescription`, returns 200, re-derives balance
-- [ ] BACKEND-003-AC-19 [AUTO]: Update returns 404 uniformly for not-found/not-owned account or cross-account/not-found transaction, no modification
-- [ ] BACKEND-003-AC-20 [AUTO]: Update with `amount`/`date`/`description`/`rawDescription` all absent returns 400, no modification
-- [ ] BACKEND-003-AC-21 [AUTO]: Present-but-blank `description` on update returns 400, no modification
-- [ ] BACKEND-003-AC-22 [AUTO]: Present-but-too-early `date` on update returns 400, no modification
-- [ ] BACKEND-003-AC-23 [AUTO]: Account association is not editable via the update endpoint
-- [ ] BACKEND-003-AC-23a [AUTO]: A present-but-blank `rawDescription` on update clears it to `null`
-- [ ] BACKEND-003-AC-11g [AUTO]: Update returns 400 for a supplied-but-invalid `accountId`, no modification
-- [ ] BACKEND-003-AC-11h [AUTO]: Update returns 404 for an absent `accountId`, no modification
-- [ ] BACKEND-003-AC-17c [AUTO]: Update returns 400 for a supplied-but-invalid `transactionId`, no modification
-- [ ] BACKEND-003-AC-17d [AUTO]: Update returns 404 for an absent `transactionId`, no modification
+- [x] BACKEND-003-AC-18 [AUTO]: Valid update updates any subset of `amount`/`date`/`description`/`rawDescription`, returns 200, re-derives balance
+- [x] BACKEND-003-AC-19 [AUTO]: Update returns 404 uniformly for not-found/not-owned account or cross-account/not-found transaction, no modification
+- [x] BACKEND-003-AC-20 [AUTO]: Update with `amount`/`date`/`description`/`rawDescription` all absent returns 400, no modification
+- [x] BACKEND-003-AC-21 [AUTO]: Present-but-blank `description` on update returns 400, no modification
+- [x] BACKEND-003-AC-22 [AUTO]: Present-but-too-early `date` on update returns 400, no modification
+- [x] BACKEND-003-AC-23 [AUTO]: Account association is not editable via the update endpoint
+- [x] BACKEND-003-AC-23a [AUTO]: A present-but-blank `rawDescription` on update clears it to `null`
+- [x] BACKEND-003-AC-11g [AUTO]: Update returns 400 for a supplied-but-invalid `accountId`, no modification
+- [x] BACKEND-003-AC-11h [AUTO]: Update returns 404 for an absent `accountId`, no modification
+- [x] BACKEND-003-AC-17c [AUTO]: Update returns 400 for a supplied-but-invalid `transactionId`, no modification
+- [x] BACKEND-003-AC-17d [AUTO]: Update returns 404 for an absent `transactionId`, no modification
 - [ ] BACKEND-003-AC-24 [AUTO]: Delete removes an owned transaction, 204, reverses balance
 - [ ] BACKEND-003-AC-25 [AUTO]: Delete returns 404 uniformly for not-found/not-owned account or cross-account/not-found transaction, no deletion
 - [ ] BACKEND-003-AC-11i [AUTO]: Delete returns 400 for a supplied-but-invalid `accountId`, no deletion
