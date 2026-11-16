@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Import
 import spock.lang.Unroll
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionCreateRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionResponse
+import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionUpdateRequest
 import uk.co.stefirby.budgetsandsubscriptions.exception.AccountNotFoundException
 import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionDateException
 import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionNotFoundException
@@ -192,12 +193,7 @@ class TransactionControllerSpec extends BaseControllerSpec {
         given: "a creation request with date before openedOn"
             AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
             UUID accountId = UUID.randomUUID()
-            TransactionCreateRequest request = new TransactionCreateRequest(
-                TRANSACTION_AMOUNT_POSITIVE,
-                TRANSACTION_DATE_BEFORE_OPENED_ON,
-                TRANSACTION_DESCRIPTION,
-                TRANSACTION_RAW_DESCRIPTION
-            )
+            TransactionCreateRequest request = transactionCreateRequestBeforeOpenedOn()
 
         and: "service throws date exception"
             mockTransactionService.addTransaction(user.id.toString(), accountId, request) >>
@@ -514,116 +510,312 @@ class TransactionControllerSpec extends BaseControllerSpec {
     // PATCH /api/accounts/{accountId}/transactions/{transactionId} tests
     //=================================
 
-    def "BACKEND-003-AC-18: updates an owned transaction's amount, date, description, or rawDescription and re-derives the balance"() {
-        given: "a transaction owned (via its account) by the authenticated user, and an update request with at least one of amount, date, description, or rawDescription present"
+    def "BACKEND-003-AC-18: updates an owned transaction's amount, date, description, or rawDescription"() {
+        given: "a transaction owned (via its account) by the authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+
+        and: "an update request with at least one of amount, date, description, or rawDescription present"
+            TransactionUpdateRequest request = transactionUpdateRequest()
 
         when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested with those ids"
+            def body = objectMapper.writeValueAsString(request)
+            def result = mockMvc.perform(patch(constructTransactionUri(accountId, transactionId))
+            .cookie(accessTokenCookie(user.jwt))
+            .contentType("application/json")
+            .content(body))
 
         then: "the response is 200 OK with the updated transaction"
+            result.andExpect(status().isOk())
 
-        and: "any field omitted from the request is unchanged on the transaction"
+        and: "the service got called with the authenticated user"
+            1 * mockTransactionService.updateTransaction(user.id.toString(), accountId, transactionId, request)
+                >> transactionResponse()
 
-        and: "the account's balance reflects the old amount reversed and the new amount applied"
+        and: "the response is in the expected format"
+            String responseJson = result.andReturn().getResponse().getContentAsString()
+            TransactionResponse response = objectMapper.readValue(responseJson, TransactionResponse)
+            response.amount() == transactionResponse().amount()
+            response.date() == transactionResponse().date()
+            response.description() == transactionResponse().description()
+            response.rawDescription() == transactionResponse().rawDescription()
     }
 
-    def "BACKEND-003-AC-19: returns 404 uniformly for not-found/not-owned account or cross-account/not-found transaction on update"() {
-        given: "a non-existent or non-owned accountId, or a transactionId that does not exist or belongs to a different account"
+    @Unroll
+    def "BACKEND-003-AC-19: returns 404 for #scenario"() {
+        given: "authenticated user, account and transaction"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+
+        and: "a valid update request"
+            TransactionUpdateRequest request = transactionUpdateRequest()
+
+        and: "service throws the relevant exception"
+            mockTransactionService.updateTransaction(user.id.toString(), accountId, transactionId, request) >>
+                { throw thrownException }
 
         when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested with that combination"
+            def body = objectMapper.writeValueAsString(request)
+            def result = mockMvc.perform(patch(constructTransactionUri(accountId, transactionId))
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 404 Not Found in every case"
+            result.andExpect(status().isNotFound())
 
-        and: "no transaction is modified"
+        where:
+            scenario                              | thrownException
+            "not-found/not-owned account"         | new AccountNotFoundException("Account Not Found")
+            "cross-account/not-found transaction" | new TransactionNotFoundException("Transaction Not Found")
     }
 
     def "BACKEND-003-AC-20: rejects an update with no fields provided"() {
-        given: "a transaction owned by the authenticated user and an update request with amount, date, description, and rawDescription all absent"
+        given: "authenticated user, account and transaction"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+
+        and: "an update with no fields provided"
+        TransactionUpdateRequest request =
+            new TransactionUpdateRequest(null, null, null, null)
 
         when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested"
+            def body = objectMapper.writeValueAsString(request)
+            def result = mockMvc.perform(patch(constructTransactionUri(accountId, transactionId))
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
 
-        and: "the transaction is not modified"
+        and: "the service is not called"
+            0 * mockTransactionService.updateTransaction(_ as String, _ as UUID, _ as UUID, _ as TransactionUpdateRequest)
     }
 
     def "BACKEND-003-AC-21: rejects an update with a present-but-blank description"() {
-        given: "a transaction owned by the authenticated user and an update request where description is present but blank"
+        given: "a transaction owned by the authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+
+        and: "an update request where description is present but blank"
+            TransactionUpdateRequest request = transactionUpdateRequestBlankDescription()
 
         when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested"
+            def body = objectMapper.writeValueAsString(request)
+            def result = mockMvc.perform(patch(constructTransactionUri(accountId, transactionId))
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
 
-        and: "the transaction is not modified"
+        and: "the service is not called"
+            0 * mockTransactionService.updateTransaction(_ as String, _ as UUID, _ as UUID, _ as TransactionUpdateRequest)
     }
 
     def "BACKEND-003-AC-22: rejects an update with a present-but-too-early date"() {
-        given: "a transaction owned by the authenticated user and an update request where date is present but earlier than the account's openedOn"
+        given: "a transaction owned by the authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+
+        and: "an update request where date is present but earlier than the account's openedOn"
+            TransactionUpdateRequest request = transactionUpdateRequestBeforeOpenedOn()
+
+        and: "the service throws a date exception"
+            mockTransactionService.updateTransaction(user.id.toString(), accountId, transactionId, request) >>
+                { throw new TransactionDateException("update date before opened on") }
 
         when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested"
+            def body = objectMapper.writeValueAsString(request)
+            def result = mockMvc.perform(patch(constructTransactionUri(accountId, transactionId))
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 400 Bad Request"
-
-        and: "the transaction is not modified"
+            result.andExpect(status().isBadRequest())
     }
 
     def "BACKEND-003-AC-23: leaves the account association unchanged on update"() {
-        given: "a transaction owned by the authenticated user and an update request body that also includes an account-identifying value"
+        given: "a transaction owned by the authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+
+        and: "an update request body that also includes an account-identifying value"
+            def payload = [
+                "amount" : TRANSACTION_AMOUNT_POSITIVE,
+                "date" : TRANSACTION_DATE_AFTER_OPENED_ON,
+                "description" : TRANSACTION_DESCRIPTION,
+                "rawDescription" : TRANSACTION_RAW_DESCRIPTION,
+                "accountId": accountId.toString()
+            ]
 
         when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested"
+            def body = objectMapper.writeValueAsString(payload)
+            def result = mockMvc.perform(patch(constructTransactionUri(accountId, transactionId))
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 200 OK"
+            result.andExpect(status().isOk())
 
-        and: "the transaction's owning account is unchanged from before the request"
+        and: "the service is called with the account-identifying value stripped out"
+            1 * mockTransactionService.updateTransaction(
+                user.id.toString(), accountId, transactionId, transactionUpdateRequest()) >> transactionResponse()
     }
 
     def "BACKEND-003-AC-23a: clears rawDescription to null when present but blank on update"() {
-        given: "a transaction owned by the authenticated user with a previously-set rawDescription, and an update request where rawDescription is present but blank"
+        given: "a transaction owned by the authenticated user with a previously-set rawDescription"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+            UUID transactionId = UUID.randomUUID()
+
+        and: " an update request where rawDescription is present but blank"
+            TransactionUpdateRequest request = transactionUpdateRequestBlankRawDescription()
 
         when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested"
+            def body = objectMapper.writeValueAsString(request)
+            def result = mockMvc.perform(patch(constructTransactionUri(accountId, transactionId))
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 200 OK"
+            result.andExpect(status().isOk())
+
+        and: "the service is called with the expected parameters"
+            1 * mockTransactionService.updateTransaction(user.id.toString(), accountId, transactionId, request)
+                >> transactionResponseWithNullRawDescription()
 
         and: "the transaction's rawDescription is null"
+            String responseJson = result.andReturn().getResponse().getContentAsString()
+            TransactionResponse response = objectMapper.readValue(responseJson, TransactionResponse)
+            response.rawDescription() == null
     }
 
-    def "BACKEND-003-AC-11g: returns 400 for a supplied-but-invalid accountId on update"() {
+    @Unroll
+    def "BACKEND-003-AC-11g: returns 400 for a supplied-but-invalid accountId on update - #scenario"() {
         given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID transactionId = UUID.randomUUID()
+
+        and: "a valid transaction update request"
+            TransactionUpdateRequest request = transactionUpdateRequest()
 
         when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested with an accountId that is not a UUID"
+            def body = objectMapper.writeValueAsString(request)
+            String uri = "/api/accounts/" + accountId + "/transactions/" + transactionId.toString()
+            def result = mockMvc.perform(patch(uri)
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
 
-        and: "no transaction is modified"
+        and: "the service is not called"
+            0 * mockTransactionService.updateTransaction(_ as String, _ as UUID, _ as UUID, _ as TransactionUpdateRequest)
+
+        where:
+            scenario   | accountId
+            "null"     | null
+            "non-uuid" | "not a uuid"
     }
 
-    def "BACKEND-003-AC-11h: returns 404 for an absent accountId on update"() {
+    @Unroll
+    def "BACKEND-003-AC-11h: returns 404 for an absent accountId on update - #scenario"() {
         given: "an authenticated user"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID transactionId = UUID.randomUUID()
+
+        and: "a valid transaction update request"
+            TransactionUpdateRequest request = transactionUpdateRequest()
 
         when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested with an accountId that is empty or blank"
+            def body = objectMapper.writeValueAsString(request)
+            String uri = "/api/accounts/" + accountId + "/transactions/" + transactionId.toString()
+            def result = mockMvc.perform(patch(uri)
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 404 Not Found"
+            result.andExpect(status().isNotFound())
 
-        and: "no transaction is modified"
+        and: "the service is not called"
+            0 * mockTransactionService.updateTransaction(_ as String, _ as UUID, _ as UUID, _ as TransactionUpdateRequest)
+
+        where:
+            scenario     | accountId
+            "empty"      | ""
+            "blank"      | "     "
     }
 
-    def "BACKEND-003-AC-17c: returns 400 for a supplied-but-invalid transactionId on update"() {
+    @Unroll
+    def "BACKEND-003-AC-17c: returns 400 for a supplied-but-invalid transactionId on update - #scenario"() {
         given: "an authenticated user and an owned account"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
 
-        when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested with a transactionId that is not a UUID"
+        and: "a valid transaction update request"
+            TransactionUpdateRequest request = transactionUpdateRequest()
+
+        when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested with an accountId that is empty or blank"
+            def body = objectMapper.writeValueAsString(request)
+            String uri = "/api/accounts/" + accountId + "/transactions/" + transactionId.toString()
+            def result = mockMvc.perform(patch(uri)
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 400 Bad Request"
+            result.andExpect(status().isBadRequest())
 
-        and: "no transaction is modified"
+        and: "the service is not called"
+            0 * mockTransactionService.updateTransaction(_ as String, _ as UUID, _ as UUID, _ as TransactionUpdateRequest)
+
+        where:
+            scenario   | transactionId
+            "null"     | null
+            "non-uuid" | "not a uuid"
     }
 
-    def "BACKEND-003-AC-17d: returns 404 for an absent transactionId on update"() {
+    @Unroll
+    def "BACKEND-003-AC-17d: returns 404 for an absent transactionId on update - #scenario"() {
         given: "an authenticated user and an owned account"
+            AuthenticatedUser user = createAuthenticatedUser(mockJwtService)
+            UUID accountId = UUID.randomUUID()
+
+        and: "a valid transaction update request"
+            TransactionUpdateRequest request = transactionUpdateRequest()
 
         when: "PATCH /api/accounts/{accountId}/transactions/{transactionId} is requested with a transactionId that is empty or blank"
+            def body = objectMapper.writeValueAsString(request)
+            String uri = "/api/accounts/" + accountId + "/transactions/" + transactionId.toString()
+            def result = mockMvc.perform(patch(uri)
+                .cookie(accessTokenCookie(user.jwt))
+                .contentType("application/json")
+                .content(body))
 
         then: "the response is 404 Not Found"
+            result.andExpect(status().isNotFound())
 
-        and: "no transaction is modified"
+        and: "the service is not called"
+            0 * mockTransactionService.updateTransaction(_ as String, _ as UUID, _ as UUID, _ as TransactionUpdateRequest)
+
+        where:
+            scenario     | transactionId
+            "empty"      | ""
+            "blank"      | "     "
     }
 
     //---------------------------------

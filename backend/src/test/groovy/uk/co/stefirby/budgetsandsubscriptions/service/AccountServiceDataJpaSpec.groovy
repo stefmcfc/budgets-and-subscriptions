@@ -182,17 +182,26 @@ class AccountServiceDataJpaSpec extends Specification {
             AccountResponse response = accountService.updateAccount(userId.toString(), accountId, request)
 
         then: "any field in the request updated successfully"
+            Account updatedAccount = accountRepository.findById(accountId).get()
+            updatedAccount.bankName == newBankName
+
             response.bankName() == newBankName
 
         and: "any field omitted from the request is unchanged on the account"
+            updatedAccount.accountName == createdAccount.accountName
+            updatedAccount.accountType == createdAccount.accountType
+
             response.accountName() == createdAccount.accountName
             response.type() == createdAccount.accountType
 
         and: "BACKEND-002-AC-20: the account's openingBalance, openedOn, and balance are unchanged from before the request"
+            updatedAccount.openingBalance == createdAccount.openingBalance
+            updatedAccount.openedOn == createdAccount.openedOn
+            updatedAccount.balance == createdAccount.balance
+
             response.openingBalance() == createdAccount.openingBalance
             response.openedOn() == createdAccount.openedOn
             response.balance() == createdAccount.balance
-
     }
 
     //----------------------

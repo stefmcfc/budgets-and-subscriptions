@@ -170,6 +170,17 @@ the system must always retain at least one ADMIN.
   sessions/devices are unaffected. Matches typical user expectation of what "logout" means.
   "Logout everywhere" was considered and intentionally left for later (see `spec_candidates.md`).
 
+## Dev tooling note — Spring Security diagnostics in HTTP responses
+
+IntelliJ IDEA 2026.3 adds a debugger feature that surfaces *which* Spring Security rule rejected a
+request (via an `x-spring-debugger-security-decisions` response header/inspector) instead of
+tracing the filter chain by hand for every 401/403. Relevant now, not just for the stages below —
+`SecurityConfig` and `JwtAuthenticationFilter` already exist and gate every `/api/**` route
+(`AUTH-001-AC-20`–`AC-23`). Worth turning on when debugging any unexpected 401/403, and especially
+useful once `admin_account_management` (stage 3) adds role-gated routes, where "which rule rejected
+this" gets harder to eyeball. See `.claude/intellij-idea-2026.3-notes.md` for the full IDE feature
+rundown; no action needed here beyond remembering to enable/use it.
+
 ## Spec breakdown
 
 Decided 2026-10-08: this feature is **6 specs, not 1 or 2** — a backend + frontend pair for each

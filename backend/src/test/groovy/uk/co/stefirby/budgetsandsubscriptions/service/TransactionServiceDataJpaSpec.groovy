@@ -8,9 +8,11 @@ import spock.lang.Specification
 import spock.lang.Subject
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionCreateRequest
 import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionResponse
+import uk.co.stefirby.budgetsandsubscriptions.dto.TransactionUpdateRequest
 import uk.co.stefirby.budgetsandsubscriptions.exception.AccountNotFoundException
 import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionDateException
 import uk.co.stefirby.budgetsandsubscriptions.exception.TransactionNotFoundException
+import uk.co.stefirby.budgetsandsubscriptions.model.Account
 import uk.co.stefirby.budgetsandsubscriptions.model.Transaction
 import uk.co.stefirby.budgetsandsubscriptions.repository.AccountRepository
 import uk.co.stefirby.budgetsandsubscriptions.repository.TransactionRepository
@@ -19,6 +21,7 @@ import uk.co.stefirby.budgetsandsubscriptions.service.common.AccountAccessServic
 
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountEntityHelper.createAndPersistAccount1
 import static uk.co.stefirby.budgetsandsubscriptions.model.util.AccountEntityHelper.createAndPersistAccount2
@@ -94,7 +97,7 @@ class TransactionServiceDataJpaSpec extends Specification {
             transactionRepository.findAllByAccountId(userAccount).size() == 0
     }
 
-    def "BACKEND-003-AC-07: AccountNotFoundException s thrown for a non-owned account on create"() {
+    def "BACKEND-003-AC-07: AccountNotFoundException is thrown for a non-owned account on create"() {
         given: "an account id owned by a different user"
             UUID userId1 = createUser(userRepository)
 
@@ -297,6 +300,208 @@ class TransactionServiceDataJpaSpec extends Specification {
 
         then: "TransactionNotFoundException thrown"
             thrown(TransactionNotFoundException)
+    }
+
+    //----------------------------
+    // updateTransaction tests
+    //============================
+
+    def "BACKEND-003-AC-18: updates an owned transaction's amount, date, description, or rawDescription and re-derives the balance"() {
+        given: "a transaction owned (via its account) by the authenticated user"
+            UUID userId = createUser(userRepository)
+            UUID userAccount1 = createAndPersistAccount1(userId, accountRepository)
+            UUID account1Transaction1 = createAndPersistPositiveTransaction(userAccount1, transactionRepository)
+
+            BigDecimal originalAccountBalance = accountRepository.findById(userAccount1).get().balance
+            BigDecimal originalTransactionAmount = transactionRepository.findById(account1Transaction1).get().amount
+
+        and: "an update request with at least one of amount, date, description, or rawDescription present"
+            BigDecimal updatedAmount = BigDecimal.valueOf(200)
+            LocalDate updatedDate = LocalDate.now(Clock.systemDefaultZone())
+            String updatedDescription = "updated description"
+            String updatedRawDescription = "updated raw description"
+
+            TransactionUpdateRequest updateRequest =
+                new TransactionUpdateRequest(updatedAmount, updatedDate, updatedDescription, updatedRawDescription)
+
+        when: "updateTransaction is called"
+            TransactionResponse updateResponse = transactionService.updateTransaction(userId.toString(),
+                userAccount1, account1Transaction1, updateRequest)
+
+        then: "columns in transaction match what was in the update request"
+            Transaction updatedTransaction = transactionRepository.findById(account1Transaction1).get()
+            updatedTransaction.amount == updatedAmount
+            updatedTransaction.date == updatedDate
+            updatedTransaction.description == updatedDescription
+            updatedTransaction.rawDescription == updatedRawDescription
+
+        and: "BACKEND-003-AC-23: the account association is unchanged from before the request"
+            updatedTransaction.accountId == userAccount1
+
+        and: "the account's balance reflects the old amount reversed and the new amount applied"
+            BigDecimal expectedAccountBalance = originalAccountBalance - originalTransactionAmount + updatedAmount
+            Account updatedAccount = accountRepository.findById(userAccount1).get()
+            updatedAccount.balance == expectedAccountBalance
+
+        and: "the updated transaction values are returned to the caller"
+            updateResponse.amount() == updatedAmount
+            updateResponse.date() == updatedDate
+            updateResponse.description() == updatedDescription
+            updateResponse.rawDescription() == updatedRawDescription
+    }
+
+    def "BACKEND-003-AC-18: a partial update with account missing leaves omitted fields unchanged and the account balance untouched"() {
+        given: "a transaction owned (via its account) by the authenticated user"
+            UUID userId = createUser(userRepository)
+            UUID userAccount1 = createAndPersistAccount1(userId, accountRepository)
+            UUID account1Transaction1 = createAndPersistPositiveTransaction(userAccount1, transactionRepository)
+
+        // capture the primitive value up front
+            BigDecimal originalAccountBalance = accountRepository.findById(userAccount1).get().balance
+            Transaction originalTransaction = transactionRepository.findById(account1Transaction1).get()
+            BigDecimal originalAmount = originalTransaction.amount
+            LocalDate originalDate = originalTransaction.date
+
+        and: "a partial update with amount missing"
+            String updatedDescription = "updated description"
+            String updatedRawDescription = "updated raw description"
+
+            TransactionUpdateRequest updateRequest =
+                new TransactionUpdateRequest(null, null, updatedDescription, updatedRawDescription)
+
+        when: "updateTransaction is called"
+            TransactionResponse updateResponse = transactionService.updateTransaction(userId.toString(),
+                userAccount1, account1Transaction1, updateRequest)
+
+        then: "columns in transaction match what was in the update request for submitted fields"
+            Transaction updatedTransaction = transactionRepository.findById(account1Transaction1).get()
+            updatedTransaction.description == updatedDescription
+            updatedTransaction.rawDescription == updatedRawDescription
+
+        and: "fields not submitted retain original value"
+            updatedTransaction.amount == originalAmount
+            updatedTransaction.date == originalDate
+
+        and: "the account's balance remains the same"
+            Account updatedAccount = accountRepository.findById(userAccount1).get()
+            updatedAccount.balance == originalAccountBalance
+
+        and: "the updated transaction values are returned to the caller"
+            updateResponse.description() == updatedDescription
+            updateResponse.rawDescription() == updatedRawDescription
+    }
+
+    def "BACKEND-003-AC-19: throws AccountNotFoundException for a non-owned accountId"() {
+        given: "valid user - user1"
+            UUID userId1 = createUser(userRepository)
+
+        and: "valid user with valid account - user2"
+            UUID userId2 = createUser2(userRepository)
+            UUID user2Account1 = createAndPersistAccount1(userId2, accountRepository)
+
+        and: "a valid update request"
+            TransactionUpdateRequest updateRequest = transactionUpdateRequest()
+
+        when: "updateTransaction called with user1 trying to access user2's account"
+            transactionService.updateTransaction(userId1.toString(), user2Account1, UUID.randomUUID(), updateRequest)
+
+        then: "AccountNotFoundException thrown"
+            thrown(AccountNotFoundException)
+    }
+
+    def "BACKEND-003-AC-19: throws TransactionNotFoundException for a non-existent transaction"() {
+        given: "a valid user and account"
+            UUID userId1 = createUser(userRepository)
+            UUID user1Account1 = createAndPersistAccount1(userId1, accountRepository)
+
+        and: "a valid update request"
+            TransactionUpdateRequest updateRequest = transactionUpdateRequest()
+
+        when: "updateTransaction called with random transactionId"
+            transactionService.updateTransaction(userId1.toString(), user1Account1, UUID.randomUUID(), updateRequest)
+
+        then: "TransactionNotFoundException thrown"
+            thrown(TransactionNotFoundException)
+    }
+
+    def "BACKEND-003-AC-19: throws TransactionNotFoundException for a non-owned transaction"() {
+        given: "valid user with valid account - user1"
+            UUID userId1 = createUser(userRepository)
+            UUID user1Account1 = createAndPersistAccount1(userId1, accountRepository)
+
+        and: "valid user with valid account and associated transaction - user2"
+            UUID userId2 = createUser2(userRepository)
+            UUID user2Account1 = createAndPersistAccount1(userId2, accountRepository)
+            UUID user2account1Transaction1 = createAndPersistPositiveTransaction(user2Account1, transactionRepository)
+
+        and: "a valid update request"
+            TransactionUpdateRequest updateRequest = transactionUpdateRequest()
+
+        when: "updateTransaction called with user1 trying to access transaction which exists on user2's account"
+            transactionService.updateTransaction(userId1.toString(), user1Account1, user2account1Transaction1, updateRequest)
+
+        then: "TransactionNotFoundException thrown"
+            thrown(TransactionNotFoundException)
+    }
+
+    def "BACKEND-003-AC-19: throws TransactionNotFoundException for a transaction on a different account"() {
+        given: "valid user with two valid accounts - user1"
+            UUID userId1 = createUser(userRepository)
+            UUID user1Account1 = createAndPersistAccount1(userId1, accountRepository)
+            UUID user1Account2 = createAndPersistAccount2(userId1, accountRepository)
+
+        and: "account2 has a valid transaction"
+            UUID user1account2Transaction1 = createAndPersistPositiveTransaction(user1Account2, transactionRepository)
+
+        and: "a valid update request"
+            TransactionUpdateRequest updateRequest = transactionUpdateRequest()
+
+        when: "updateTransaction called with user1 trying to access transaction which exists on user2's account"
+            transactionService.updateTransaction(userId1.toString(), user1Account1, user1account2Transaction1, updateRequest)
+
+        then: "TransactionNotFoundException thrown"
+            thrown(TransactionNotFoundException)
+    }
+
+    def "BACKEND-003-AC-22: rejects an update with a present-but-too-early date"() {
+        given: "a transaction owned by the authenticated user"
+            UUID userId = createUser(userRepository)
+            UUID userAccount1 = createAndPersistAccount1(userId, accountRepository)
+            UUID account1Transaction1 = createAndPersistPositiveTransaction(userAccount1, transactionRepository)
+
+            Transaction originalTransaction = transactionRepository.findById(account1Transaction1).get()
+
+        and: "an update request where date is present but earlier than the account's openedOn"
+            LocalDate earlyDate = LocalDate.of(1999, 12, 31)
+            TransactionUpdateRequest updateRequest =
+                new TransactionUpdateRequest(null, earlyDate, null, null)
+
+        when: "updateTransaction is called"
+            transactionService.updateTransaction(userId.toString(), userAccount1, account1Transaction1, updateRequest)
+
+        then: "TransactionDateException is thrown"
+            thrown(TransactionDateException)
+
+        and: "the transaction is not modified"
+            Transaction checkTransaction = transactionRepository.findById(account1Transaction1).get()
+            checkTransaction.getDate() == originalTransaction.getDate()
+    }
+
+    def "BACKEND-003-AC-23a: clears rawDescription to null when present but blank on update"() {
+        given: "a transaction owned by the authenticated user with a previously-set rawDescription"
+            UUID userId = createUser(userRepository)
+            UUID userAccount1 = createAndPersistAccount1(userId, accountRepository)
+            UUID account1Transaction1 = createAndPersistPositiveTransaction(userAccount1, transactionRepository)
+
+        and: "an update request where rawDescription is present but blank"
+            TransactionUpdateRequest updateRequest = transactionUpdateRequestBlankRawDescription()
+
+        when: "updateTransaction is called"
+            transactionService.updateTransaction(userId.toString(), userAccount1, account1Transaction1, updateRequest)
+
+        then: "the transaction's rawDescription is now null"
+            Transaction checkTransaction = transactionRepository.findById(account1Transaction1).get()
+            checkTransaction.getRawDescription() == null
     }
 
 }
